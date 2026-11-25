@@ -103,6 +103,9 @@ public class MainActivity extends Activity {
         page.addView(preview);
         // UI-only prototype: verification controls are intentionally non-functional.
     }
+    private int dp(float value) {
+        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+    }
     private void showChat() {
         base();
         LinearLayout header = row(); header.setPadding(4,8,4,16);
@@ -134,13 +137,36 @@ public class MainActivity extends Activity {
         call.setPadding(14,16,14,16); call.setBackground(shape(0xff142d68,24,1,0xff315bce));
         page.addView(call,new LinearLayout.LayoutParams(-1,-2));
         gap(page,12);
-        LinearLayout composer = row(); composer.setPadding(14,4,8,4);
-        composer.setBackground(shape(panel,40,1,0xff303d69));
-        TextView plus = text("＋",25,0xffb7c6ed,true); composer.addView(plus,new LinearLayout.LayoutParams(35,48));
-        TextView hint = text("Message Laiba…",14,0xff929fbe,false); hint.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
-        composer.addView(hint,new LinearLayout.LayoutParams(0,48,1));
-        composer.addView(text("🎙",20,Color.WHITE,false),new LinearLayout.LayoutParams(35,48));
-        page.addView(composer);
+        LinearLayout composer = row();
+        composer.setPadding(dp(10), dp(6), dp(8), dp(6));
+        composer.setBackground(shape(0xff171e38, dp(28), 1, 0xff354568));
+
+        TextView plus = text("＋", 25, 0xffc5d4f5, false);
+        plus.setBackground(shape(0xff222d4b, dp(20), 1, 0xff354568));
+        composer.addView(plus, new LinearLayout.LayoutParams(dp(42), dp(42)));
+
+        EditText input = new EditText(this);
+        input.setHint("Message Laiba…");
+        input.setHintTextColor(0xff929fbe);
+        input.setTextColor(Color.WHITE);
+        input.setTextSize(16);
+        input.setSingleLine(false);
+        input.setMaxLines(4);
+        input.setMinLines(1);
+        input.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        input.setPadding(dp(12), dp(8), dp(8), dp(8));
+        input.setBackgroundColor(Color.TRANSPARENT);
+        composer.addView(input, new LinearLayout.LayoutParams(0, -2, 1));
+
+        TextView mic = text("🎙", 19, Color.WHITE, false);
+        composer.addView(mic, new LinearLayout.LayoutParams(dp(40), dp(44)));
+
+        TextView send = text("↑", 24, Color.WHITE, true);
+        send.setBackground(shape(0xff3185ff, dp(24), 0, 0));
+        send.setElevation(dp(3));
+        composer.addView(send, new LinearLayout.LayoutParams(dp(44), dp(44)));
+
+        page.addView(composer, new LinearLayout.LayoutParams(-1, -2));
         gap(page,10);
         LinearLayout nav = row(); nav.setBackground(shape(0xff0b1024,22,1,0xff222d4d)); nav.setPadding(4,8,4,8);
         String[] tabs={"▣\\nChat","☎\\nCall","▦\\nTools","⚙\\nSettings"};
