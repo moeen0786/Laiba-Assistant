@@ -124,14 +124,6 @@ public class MainActivity extends Activity {
         page.addView(text("Good evening", 26, Color.WHITE, true));
         page.addView(text("How can I help you today?", 16, 0xffaab8df, false));
         gap(page, 32);
-        LinearLayout suggestion = row();
-        for (String s : new String[]{"Explain", "Write", "Ideas"}) {
-            TextView c = text(s, 13, 0xffe0e8ff, false);
-            c.setPadding(13,12,13,12); c.setBackground(shape(panel,28,1,0xff303d69));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,-2,1); lp.setMargins(3,0,3,0);
-            suggestion.addView(c,lp);
-        }
-        page.addView(suggestion);
         View spacer = new View(this); page.addView(spacer,new LinearLayout.LayoutParams(1,0,1));
         TextView call = text("☎     Start a voice conversation", 15, Color.WHITE, true);
         call.setPadding(14,16,14,16); call.setBackground(shape(0xff142d68,24,1,0xff315bce));
