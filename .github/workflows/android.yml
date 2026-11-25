@@ -35,9 +35,13 @@ jobs:
 
   build:
     if: >-
+      (github.event_name == 'push' &&
+       (github.ref == 'refs/heads/laiba-self-development' ||
+        github.ref == 'refs/heads/main')) ||
       (github.event_name == 'pull_request' &&
-       github.event.pull_request.head.ref == 'laiba-self-development') ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+       github.event.pull_request.base.ref == 'main' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -59,36 +63,26 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build PR debug APK
-        if: github.event_name == 'pull_request'
-        run: gradle assembleDebug
-
       - name: Prepare private signing key
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           LAIBA_KEYSTORE_BASE64: ${{ secrets.LAIBA_KEYSTORE_BASE64 }}
         run: |
           test -n "$LAIBA_KEYSTORE_BASE64"
           echo "$LAIBA_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/laiba-release.jks"
+          test -s "$RUNNER_TEMP/laiba-release.jks"
           echo "LAIBA_KEYSTORE_PATH=$RUNNER_TEMP/laiba-release.jks" >> "$GITHUB_ENV"
 
       - name: Build signed release APK
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           LAIBA_STORE_PASSWORD: ${{ secrets.LAIBA_STORE_PASSWORD }}
           LAIBA_KEY_PASSWORD: ${{ secrets.LAIBA_KEY_PASSWORD }}
           LAIBA_KEY_ALIAS: laiba-release
-        run: gradle assembleRelease
-
-      - name: Upload PR debug APK
-        if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Laiba-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+        run: |
+          test -n "$LAIBA_STORE_PASSWORD"
+          test -n "$LAIBA_KEY_PASSWORD"
+          gradle assembleRelease
 
       - name: Upload signed release APK
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: Laiba-signed-release-apk
