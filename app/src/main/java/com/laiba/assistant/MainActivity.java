@@ -282,32 +282,103 @@ public class MainActivity extends Activity {
         }
     }
 
+
     private void showVerification() {
-        getWindow().getDecorView().setSystemUiVisibility(0);
+        getWindow().getDecorView().setSystemUiVisibility(
+            View.SYSTEM_UI_FLAG_FULLSCREEN |
+            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY |
+            View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
+            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
+            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        );
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
-        base(); gap(page, 28); page.addView(text("G", 48, 0xff4285f4, true));
-        page.addView(text("Google Gemini", 27, Color.WHITE, true));
-        page.addView(text("Verification Required", 16, 0xffc6d1f1, false));
-        gap(page, 18); page.addView(text("To continue using Laiba,\\nverify your Google account", 16, Color.WHITE, false));
-        gap(page, 24);
-        LinearLayout benefits = column(); benefits.setPadding(18, 18, 18, 18);
-        benefits.setBackground(shape(panel, 24, 1, 0xff29365f));
-        for (String s : new String[]{"✓   Secure & Private", "✓   Get Latest AI Features", "✓   Continue with Google"}) {
-            TextView t = text(s, 15, Color.WHITE, true); t.setGravity(Gravity.CENTER_VERTICAL);
-            benefits.addView(t, new LinearLayout.LayoutParams(-1, 42));
+
+        root = new FrameLayout(this);
+        root.setBackgroundColor(bg);
+        page = column();
+        page.setPadding(dp(22), dp(10), dp(22), dp(10));
+        page.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        root.addView(page, new FrameLayout.LayoutParams(-1, -1));
+        setContentView(root);
+
+        View topSpace = new View(this);
+        page.addView(topSpace,
+            new LinearLayout.LayoutParams(1, 0, 0.3f));
+
+        SplashOrbView orb = new SplashOrbView();
+        page.addView(orb,
+            new LinearLayout.LayoutParams(dp(180), dp(180)));
+
+        gap(page, 8);
+        page.addView(text("Laiba", 38, Color.WHITE, true));
+        page.addView(text("Google Gemini", 19, 0xffb8d5ff, true));
+        page.addView(text("Verification Required", 15, 0xffaab8df, false));
+
+        gap(page, 12);
+
+        SplashWaveView wave = new SplashWaveView();
+        page.addView(wave,
+            new LinearLayout.LayoutParams(-1, dp(38)));
+
+        gap(page, 12);
+
+        LinearLayout card = column();
+        card.setPadding(dp(17), dp(14), dp(17), dp(14));
+        card.setBackground(shape(panel, dp(25), dp(1), 0xff315bce));
+
+        card.addView(text("Welcome to Laiba", 21, Color.WHITE, true));
+        gap(card, 6);
+        card.addView(text(
+            "Continue by choosing your preferred sign-in option",
+            14, 0xffb8c7e9, false));
+
+        gap(card, 12);
+
+        for (String s : new String[]{
+            "✦   Secure & Private",
+            "✦   Your Personal AI Assistant",
+            "✦   Powered by Gemini"
+        }) {
+            TextView item = text(s, 14, 0xffdce7ff, true);
+            item.setGravity(Gravity.CENTER_VERTICAL);
+            card.addView(item,
+                new LinearLayout.LayoutParams(-1, dp(30)));
         }
-        page.addView(benefits, new LinearLayout.LayoutParams(-1, -2));
-        gap(page, 22); page.addView(pill("G    Sign in with Google", blue), new LinearLayout.LayoutParams(-1,-2));
-        gap(page, 14); page.addView(text("──────────────  or  ──────────────", 13, 0xff8795bd, false));
-        gap(page, 14);
-        TextView api = text("Use API Key", 15, Color.WHITE, true);
-        api.setPadding(12,14,12,14); api.setBackground(shape(bg, 40, 2, cyan));
-        page.addView(api, new LinearLayout.LayoutParams(-1,-2));
-        gap(page, 26); page.addView(text("◆  Your data is safe with Laiba", 12, 0xffaab8df, false));
-        gap(page, 35); TextView preview = text("Preview UI  •  No functions connected yet", 11, 0xff6e7ca7, false);
-        page.addView(preview);
-        // UI-only prototype: verification controls are intentionally non-functional.
+
+        gap(card, 14);
+
+        TextView google = text(
+            "G     Sign in with Google", 16, Color.WHITE, true);
+        google.setPadding(dp(12), dp(15), dp(12), dp(15));
+        google.setBackground(shape(blue, dp(18), 1, 0xff67aaff));
+        card.addView(google,
+            new LinearLayout.LayoutParams(-1, -2));
+
+        gap(card, 10);
+
+        TextView api = text(
+            "Use API Key", 15, 0xffe5f2ff, true);
+        api.setPadding(dp(12), dp(14), dp(12), dp(14));
+        api.setBackground(shape(bg, dp(18), 1, cyan));
+        card.addView(api,
+            new LinearLayout.LayoutParams(-1, -2));
+
+        page.addView(card,
+            new LinearLayout.LayoutParams(-1, -2));
+
+        gap(page, 12);
+        page.addView(text(
+            "Your AI experience starts here",
+            13, 0xff9cadd5, false));
+
+        View bottomSpace = new View(this);
+        page.addView(bottomSpace,
+            new LinearLayout.LayoutParams(1, 0, 0.3f));
+
+        // UI-only preview. No login, API, or button actions are connected.
     }
     private int dp(float value) {
         return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
