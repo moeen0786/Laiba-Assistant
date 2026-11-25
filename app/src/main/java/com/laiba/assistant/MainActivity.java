@@ -531,6 +531,18 @@ public class MainActivity extends Activity {
         );
 
         base();
+
+        // Keep chat content below the Android status bar.
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            int topInset = insets.getSystemWindowInsetTop();
+            page.setPadding(
+                dp(22), topInset + dp(18),
+                dp(22), dp(18)
+            );
+            return insets;
+        });
+        root.requestApplyInsets();
+
         LinearLayout header = row();
         header.setPadding(4,14,4,10);
 
