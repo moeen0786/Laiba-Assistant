@@ -1,11 +1,20 @@
 name: Build Laiba APK
+
 on:
   push:
-    branches: [ main ]
+    branches: [laiba-self-development]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.ref == 'laiba-self-development'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -17,14 +26,25 @@ jobs:
           java-version: '17'
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-      - name: Install Gradle
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Build debug APK
+      - name: Build APK
         run: gradle assembleDebug
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Laiba-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+
+  auto-merge:
+    needs: build
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'laiba-self-development'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge after successful build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr merge "$PR_NUMBER" --merge --repo "$GITHUB_REPOSITORY"
