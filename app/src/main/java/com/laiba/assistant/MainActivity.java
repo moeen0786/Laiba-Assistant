@@ -549,6 +549,8 @@ public class MainActivity extends Activity {
         TextView menu = text("☰", 24, cyan, true);
         menu.setBackground(shape(0xff172b50, dp(21), dp(1), 0xff4b9cff));
         menu.setElevation(dp(5));
+        menu.setTranslationX(-dp(12));
+        menu.setTranslationY(-dp(5));
         header.addView(menu, new LinearLayout.LayoutParams(dp(46),dp(46)));
         menu.setOnClickListener(v -> showMenu());
 
