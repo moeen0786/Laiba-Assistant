@@ -380,6 +380,142 @@ public class MainActivity extends Activity {
 
         // UI-only preview. No login, API, or button actions are connected.
     }
+
+    private void showCallScreen() {
+        getWindow().setStatusBarColor(bg);
+        getWindow().setNavigationBarColor(bg);
+        getWindow().getDecorView().setSystemUiVisibility(
+            View.SYSTEM_UI_FLAG_FULLSCREEN |
+            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY |
+            View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
+            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
+            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        );
+
+        root = new FrameLayout(this);
+        root.setBackgroundColor(bg);
+        page = column();
+        page.setPadding(dp(22), dp(20), dp(22), dp(24));
+        page.setGravity(Gravity.CENTER);
+        root.addView(page, new FrameLayout.LayoutParams(-1, -1));
+        setContentView(root);
+
+        View topSpace = new View(this);
+        page.addView(topSpace, new LinearLayout.LayoutParams(1, 0, 1));
+
+        page.addView(text("Laiba", 25, Color.WHITE, true));
+        gap(page, dp(8));
+        page.addView(text("Voice", 14, 0xffaab8df, false));
+        gap(page, dp(20));
+
+        CallOrbView callOrb = new CallOrbView();
+        page.addView(callOrb,
+            new LinearLayout.LayoutParams(dp(270), dp(270)));
+
+        View middleSpace = new View(this);
+        page.addView(middleSpace, new LinearLayout.LayoutParams(1, 0, 1));
+
+        LinearLayout controls = row();
+        controls.setGravity(Gravity.CENTER);
+
+        TextView mute = text("🎙", 25, Color.WHITE, true);
+        mute.setGravity(Gravity.CENTER);
+        mute.setBackground(shape(0xff26334f, dp(34), dp(1), 0xff52658e));
+        mute.setContentDescription("Mute microphone");
+        controls.addView(mute,
+            new LinearLayout.LayoutParams(dp(68), dp(68)));
+
+        View controlGap = new View(this);
+        controls.addView(controlGap,
+            new LinearLayout.LayoutParams(dp(38), 1));
+
+        TextView close = text("×", 38, Color.WHITE, false);
+        close.setGravity(Gravity.CENTER);
+        close.setBackground(shape(0xffe53945, dp(36), 0, 0));
+        close.setContentDescription("Close call screen");
+        controls.addView(close,
+            new LinearLayout.LayoutParams(dp(68), dp(68)));
+
+        page.addView(controls);
+        gap(page, dp(18));
+
+        View bottomSpace = new View(this);
+        page.addView(bottomSpace, new LinearLayout.LayoutParams(1, 0, 0.25f));
+
+        final boolean[] muted = {false};
+        mute.setOnClickListener(v -> {
+            muted[0] = !muted[0];
+            mute.setText(muted[0] ? "🔇" : "🎙");
+            mute.setBackground(shape(
+                muted[0] ? 0xff48516a : 0xff26334f,
+                dp(34), dp(1), muted[0] ? 0xffaab8df : 0xff52658e));
+        });
+
+        close.setOnClickListener(v -> showChat());
+    }
+
+    private class CallOrbView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final long start = System.currentTimeMillis();
+
+        CallOrbView() {
+            super(MainActivity.this);
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+
+            float cx = getWidth() / 2f;
+            float cy = getHeight() / 2f;
+            float time = (System.currentTimeMillis() - start) / 1000f;
+            float pulse = 1f + .075f *
+                (float)(.5 + .5 * Math.sin(time * 2.8f));
+            float radius = dp(72) * pulse;
+
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(1.5f));
+            paint.setColor(0x6656c8ff);
+            canvas.drawCircle(cx, cy, radius * 1.48f, paint);
+
+            paint.setColor(0x887f7bff);
+            canvas.save();
+            canvas.rotate(time * 32f, cx, cy);
+            canvas.drawOval(new RectF(
+                cx - radius * 1.65f, cy - radius * .62f,
+                cx + radius * 1.65f, cy + radius * .62f), paint);
+            canvas.restore();
+
+            paint.setStyle(Paint.Style.FILL);
+            paint.setShadowLayer(dp(24), 0, 0, 0xff168bff);
+            paint.setShader(new RadialGradient(
+                cx - radius * .28f, cy - radius * .34f, radius * 1.55f,
+                new int[]{0xffffffff, 0xffb8efff, 0xff32aaff,
+                    0xff2863ed, 0xff5638b8},
+                null, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, radius, paint);
+            paint.setShader(null);
+            paint.clearShadowLayer();
+
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(2));
+            paint.setColor(0xffd8f6ff);
+            canvas.drawCircle(cx, cy, radius * 1.04f, paint);
+
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0x99ffffff);
+            for (int i = 0; i < 8; i++) {
+                float a = time * .7f + i * (float)Math.PI / 4f;
+                float x = cx + (float)Math.cos(a) * radius * 1.72f;
+                float y = cy + (float)Math.sin(a) * radius * 1.72f;
+                canvas.drawCircle(x, y, dp(2.2f), paint);
+            }
+
+            postInvalidateDelayed(32);
+        }
+    }
+
     private int dp(float value) {
         return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
     }
@@ -430,6 +566,7 @@ public class MainActivity extends Activity {
         call.setGravity(Gravity.CENTER);
         call.setBackground(shape(0xff142d68, dp(22), 1, 0xff315bce));
         composer.addView(call, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        call.setOnClickListener(v -> showCallScreen());
 
         TextView send = text("↑", 24, Color.WHITE, true);
         send.setBackground(shape(0xff3185ff, dp(24), 0, 0));
