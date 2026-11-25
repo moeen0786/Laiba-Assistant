@@ -402,10 +402,6 @@ public class MainActivity extends Activity {
         page.addView(text("How can I help you today?", 16, 0xffaab8df, false));
         gap(page, 32);
         View spacer = new View(this); page.addView(spacer,new LinearLayout.LayoutParams(1,0,1));
-        TextView call = text("☎     Start a voice conversation", 15, Color.WHITE, true);
-        call.setPadding(14,16,14,16); call.setBackground(shape(0xff142d68,24,1,0xff315bce));
-        page.addView(call,new LinearLayout.LayoutParams(-1,-2));
-        gap(page,12);
         LinearLayout composer = row();
         composer.setPadding(dp(10), dp(6), dp(8), dp(6));
         composer.setBackground(shape(0xff171e38, dp(28), 1, 0xff354568));
@@ -429,6 +425,11 @@ public class MainActivity extends Activity {
 
         TextView mic = text("🎙", 19, Color.WHITE, false);
         composer.addView(mic, new LinearLayout.LayoutParams(dp(40), dp(44)));
+
+        TextView call = text("☎", 18, Color.WHITE, true);
+        call.setGravity(Gravity.CENTER);
+        call.setBackground(shape(0xff142d68, dp(22), 1, 0xff315bce));
+        composer.addView(call, new LinearLayout.LayoutParams(dp(40), dp(40)));
 
         TextView send = text("↑", 24, Color.WHITE, true);
         send.setBackground(shape(0xff3185ff, dp(24), 0, 0));
