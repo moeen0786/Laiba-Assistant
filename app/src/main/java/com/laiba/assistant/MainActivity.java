@@ -27,6 +27,7 @@ public class MainActivity extends Activity {
     private final int purple = Color.rgb(151, 65, 255);
     private FrameLayout root;
     private LinearLayout page;
+    private int menuState = 0;
 
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
@@ -520,9 +521,14 @@ public class MainActivity extends Activity {
         return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
     }
     private void showChat() {
+        menuState = 0;
         base();
         LinearLayout header = row(); header.setPadding(4,8,4,16);
-        TextView menu = text("☰", 25, Color.WHITE, true); header.addView(menu, new LinearLayout.LayoutParams(48,52));
+        TextView menu = text("☰", 24, cyan, true);
+        menu.setBackground(shape(0xff14264b, dp(16), dp(1), 0xff287dce));
+        menu.setElevation(dp(5));
+        header.addView(menu, new LinearLayout.LayoutParams(dp(46),dp(46)));
+        menu.setOnClickListener(v -> showMenu());
         header.addView(orb(22), new LinearLayout.LayoutParams(42,42));
         LinearLayout name = column(); name.setGravity(Gravity.CENTER_VERTICAL);
         name.addView(text("Laiba", 19, Color.WHITE, true));
@@ -574,11 +580,128 @@ public class MainActivity extends Activity {
         composer.addView(send, new LinearLayout.LayoutParams(dp(44), dp(44)));
 
         page.addView(composer, new LinearLayout.LayoutParams(-1, -2));
-        gap(page,10);
-        LinearLayout nav = row(); nav.setBackground(shape(0xff0b1024,22,1,0xff222d4d)); nav.setPadding(4,8,4,8);
-        String[] tabs={"▣\\nChat","☎\\nCall","▦\\nTools","⚙\\nSettings"};
-        for(String s:tabs){ TextView t=text(s,13,0xffcbd8fb,true); nav.addView(t,new LinearLayout.LayoutParams(0,55,1)); }
-        page.addView(nav);
+        gap(page, 8);
     }
-    @Override public void onBackPressed() { showChat(); }
+
+    private void addMenuItem(LinearLayout target, String symbol,
+                             String title, String description) {
+        LinearLayout card = row();
+        card.setPadding(dp(15), dp(14), dp(13), dp(14));
+        card.setBackground(shape(0xff152344, dp(20), dp(1), 0xff31558c));
+        card.setElevation(dp(3));
+
+        TextView icon = text(symbol, 25, cyan, true);
+        icon.setBackground(shape(0xff203b68, dp(16), dp(1), 0xff3279c8));
+        card.addView(icon, new LinearLayout.LayoutParams(dp(52), dp(52)));
+
+        LinearLayout labels = column();
+        labels.setGravity(Gravity.CENTER_VERTICAL);
+        labels.setPadding(dp(14), 0, 0, 0);
+        labels.addView(text(title, 16, Color.WHITE, true));
+        TextView sub = text(description, 11, 0xffaab8df, false);
+        sub.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+        labels.addView(sub);
+        card.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
+
+        card.addView(text("›", 29, cyan, true),
+            new LinearLayout.LayoutParams(dp(25), dp(45)));
+
+        LinearLayout.LayoutParams lp =
+            new LinearLayout.LayoutParams(-1, -2);
+        lp.bottomMargin = dp(13);
+        target.addView(card, lp);
+        card.setOnClickListener(v -> showMenuPreview(title, description, symbol));
+    }
+
+    private void showMenu() {
+        menuState = 1;
+        base();
+
+        LinearLayout header = row();
+        TextView back = text("‹", 34, cyan, true);
+        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        back.setOnClickListener(v -> showChat());
+
+        LinearLayout heading = column();
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        heading.addView(text("LAIBA AI", 17, Color.WHITE, true));
+        heading.addView(text("COMMAND CENTER", 10, cyan, true));
+        header.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
+        header.addView(orb(20), new LinearLayout.LayoutParams(dp(42), dp(42)));
+        page.addView(header);
+
+        gap(page, 24);
+        LinearLayout hero = column();
+        hero.setGravity(Gravity.LEFT);
+        hero.setPadding(dp(18), dp(20), dp(18), dp(20));
+        hero.setBackground(shape(0xff111d3d, dp(24), dp(1), 0xff294d82));
+        hero.addView(text("✦  YOUR SPACE", 12, cyan, true));
+        gap(hero, 8);
+        TextView title = text("Your Space.", 27, Color.WHITE, true);
+        title.setGravity(Gravity.LEFT);
+        hero.addView(title);
+        TextView sub = text("Manage your Laiba experience.", 13, 0xffaab8df, false);
+        sub.setGravity(Gravity.LEFT);
+        hero.addView(sub);
+        page.addView(hero, new LinearLayout.LayoutParams(-1, -2));
+
+        gap(page, 20);
+        TextView section = text("EXPLORE YOUR LAIBA", 11, 0xff8fa9d8, true);
+        section.setGravity(Gravity.LEFT);
+        page.addView(section);
+        gap(page, 12);
+
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout items = column();
+        items.setPadding(dp(1), dp(2), dp(1), dp(12));
+        addMenuItem(items, "◷", "Chat History", "Past conversations");
+        addMenuItem(items, "◉", "Call History", "Voice sessions");
+        addMenuItem(items, "✧", "AI Tools", "Your smart toolkit");
+        addMenuItem(items, "⚙", "Settings", "Personalize Laiba");
+        scroll.addView(items);
+        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+
+        gap(page, 8);
+        page.addView(text("LAIBA  •  PERSONAL AI", 10, 0xff7187b8, true));
+    }
+
+    private void showMenuPreview(String title, String description, String symbol) {
+        menuState = 2;
+        base();
+
+        LinearLayout header = row();
+        TextView back = text("‹", 34, cyan, true);
+        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        back.setOnClickListener(v -> showMenu());
+        header.addView(text("COMMAND CENTER", 14, Color.WHITE, true));
+        page.addView(header);
+
+        View spacer = new View(this);
+        page.addView(spacer, new LinearLayout.LayoutParams(1, 0, 0.35f));
+
+        TextView icon = text(symbol, 48, cyan, true);
+        icon.setBackground(shape(0xff152d57, dp(30), dp(1), 0xff3279c8));
+        page.addView(icon, new LinearLayout.LayoutParams(dp(104), dp(104)));
+
+        gap(page, 22);
+        page.addView(text(title, 25, Color.WHITE, true));
+        gap(page, 7);
+        page.addView(text(description, 14, 0xffaab8df, false));
+        gap(page, 18);
+        page.addView(text("This section is a UI preview.", 12, 0xff7187b8, false));
+        gap(page, 25);
+
+        TextView backButton = pill("‹   Back to Command Center", 0xff174b91);
+        page.addView(backButton);
+        backButton.setOnClickListener(v -> showMenu());
+
+        View bottom = new View(this);
+        page.addView(bottom, new LinearLayout.LayoutParams(1, 0, 0.45f));
+    }
+
+    @Override public void onBackPressed() {
+        if (menuState == 2) showMenu();
+        else if (menuState == 1) showChat();
+        else showChat();
+    }
 }
