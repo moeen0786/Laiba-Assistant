@@ -1,6 +1,15 @@
 package com.laiba.assistant;
 
 import android.app.Activity;
+
+import android.animation.ValueAnimator;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.RectF;
+import android.graphics.RadialGradient;
+import android.graphics.Shader;
+import android.view.animation.LinearInterpolator;
+
 import android.os.Bundle;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -67,19 +76,216 @@ public class MainActivity extends Activity {
         g.setShape(GradientDrawable.OVAL); g.setStroke(3, Color.rgb(105,190,255));
         o.setBackground(g); o.setElevation(18); return o;
     }
+
     private void showSplash() {
-        base(); gap(page, 80); page.addView(orb(76), new LinearLayout.LayoutParams(150,150));
-        gap(page, 22); page.addView(text("Laiba", 48, Color.WHITE, true));
-        page.addView(text("Your AI Assistant", 19, 0xffc9d3f5, false));
-        gap(page, 24); page.addView(text("Chat  •  Call  •  Create  •  Explore", 15, 0xffaab8df, false));
-        gap(page, 100); page.addView(text("Powered by Google Gemini", 15, 0xffdbe5ff, true));
-        gap(page, 18); ProgressBar p = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        p.setProgressTintList(android.content.res.ColorStateList.valueOf(cyan));
-        p.setProgress(72); page.addView(p, new LinearLayout.LayoutParams(180, 5));
-        page.addView(text("Initializing Laiba", 12, 0xff8e9bc1, false));
-        root.postDelayed(this::showVerification, 1300);
+        getWindow().setStatusBarColor(bg);
+        getWindow().setNavigationBarColor(bg);
+        getWindow().getDecorView().setSystemUiVisibility(
+            View.SYSTEM_UI_FLAG_FULLSCREEN |
+            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY |
+            View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
+            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
+            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        );
+
+        root = new FrameLayout(this);
+        root.setBackgroundColor(bg);
+        page = column();
+        page.setPadding(dp(20), dp(12), dp(20), dp(12));
+        page.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        root.addView(page, new FrameLayout.LayoutParams(-1, -1));
+        setContentView(root);
+
+        View topSpace = new View(this);
+        page.addView(topSpace,
+            new LinearLayout.LayoutParams(1, 0, 0.45f));
+
+        SplashOrbView orb = new SplashOrbView();
+        page.addView(orb,
+            new LinearLayout.LayoutParams(dp(250), dp(250)));
+
+        gap(page, 10);
+        page.addView(text("Laiba", 48, Color.WHITE, true));
+        page.addView(text("Your AI Assistant", 19,
+            0xffc9d3f5, false));
+
+        gap(page, 12);
+
+        SplashWaveView wave = new SplashWaveView();
+        page.addView(wave,
+            new LinearLayout.LayoutParams(-1, dp(48)));
+
+        gap(page, 18);
+
+        LinearLayout card = column();
+        card.setGravity(Gravity.CENTER);
+        card.setPadding(dp(16), dp(14), dp(16), dp(14));
+        card.setBackground(shape(panel, dp(25), dp(1), 0xff315bce));
+
+        TextView loading = text("Preparing your AI experience",
+            16, Color.WHITE, true);
+        card.addView(loading);
+
+        gap(card, 12);
+
+        LinearLayout progressRow = row();
+
+        ProgressBar progress = new ProgressBar(
+            this, null, android.R.attr.progressBarStyleHorizontal);
+        progress.setMax(100);
+        progress.setProgress(0);
+        progress.setProgressTintList(
+            android.content.res.ColorStateList.valueOf(cyan));
+        progress.setProgressBackgroundTintList(
+            android.content.res.ColorStateList.valueOf(0xff172653));
+
+        progressRow.addView(progress,
+            new LinearLayout.LayoutParams(0, dp(7), 1));
+
+        TextView percent = text("0%", 16, Color.WHITE, true);
+        LinearLayout.LayoutParams percentParams =
+            new LinearLayout.LayoutParams(dp(48), dp(30));
+        percentParams.leftMargin = dp(10);
+        progressRow.addView(percent, percentParams);
+
+        card.addView(progressRow);
+        page.addView(card,
+            new LinearLayout.LayoutParams(-1, -2));
+
+        gap(page, 20);
+
+        page.addView(text("Powered by Google Gemini",
+            15, 0xffdbe5ff, true));
+
+        View bottomSpace = new View(this);
+        page.addView(bottomSpace,
+            new LinearLayout.LayoutParams(1, 0, 0.45f));
+
+        ValueAnimator loadingAnimator =
+            ValueAnimator.ofInt(0, 100);
+
+        loadingAnimator.setDuration(4200);
+        loadingAnimator.setInterpolator(new LinearInterpolator());
+
+        loadingAnimator.addUpdateListener(animation -> {
+            int value = (int) animation.getAnimatedValue();
+            progress.setProgress(value);
+            percent.setText(value + "%");
+        });
+
+        loadingAnimator.addListener(
+            new android.animation.AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(
+                    android.animation.Animator animation) {
+                    showVerification();
+                }
+            });
+
+        root.post(loadingAnimator::start);
     }
+
+    private class SplashOrbView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final long start = System.currentTimeMillis();
+
+        SplashOrbView() {
+            super(MainActivity.this);
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+
+            float cx = getWidth() / 2f;
+            float cy = getHeight() / 2f;
+            float r = dp(72);
+            float t = (System.currentTimeMillis() - start) / 1000f;
+
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(1.5f));
+
+            for (int i = 0; i < 3; i++) {
+                paint.setColor(i == 1 ? 0xff00cdff : 0xff674dff);
+                canvas.save();
+                canvas.rotate(t * (i % 2 == 0 ? 25 : -35) + i * 55,
+                    cx, cy);
+                canvas.drawOval(new RectF(
+                    cx - r * (1.45f + i * .12f),
+                    cy - r * (.42f + i * .08f),
+                    cx + r * (1.45f + i * .12f),
+                    cy + r * (.42f + i * .08f)
+                ), paint);
+                canvas.restore();
+            }
+
+            paint.setStyle(Paint.Style.FILL);
+            paint.setShader(new RadialGradient(
+                cx - r * .25f, cy - r * .3f,
+                r * 1.5f,
+                new int[]{0xffb8ffff, 0xff00cfff,
+                    0xff315bff, 0xff873bff},
+                null, Shader.TileMode.CLAMP));
+
+            canvas.drawCircle(cx, cy, r, paint);
+            paint.setShader(null);
+
+            paint.setColor(Color.WHITE);
+            paint.setTextAlign(Paint.Align.CENTER);
+            paint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            paint.setTextSize(dp(75));
+            canvas.drawText("✦", cx, cy + dp(25), paint);
+
+            paint.setColor(0xff00dfff);
+            for (int i = 0; i < 12; i++) {
+                float a = t + i * .523f;
+                float x = cx + (float)Math.cos(a) * r * 1.65f;
+                float y = cy + (float)Math.sin(a) * r * .9f;
+                canvas.drawCircle(x, y, dp(2), paint);
+            }
+
+            postInvalidateDelayed(16);
+        }
+    }
+
+    private class SplashWaveView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final long start = System.currentTimeMillis();
+
+        SplashWaveView() {
+            super(MainActivity.this);
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+
+            float t = (System.currentTimeMillis() - start) / 180f;
+            float center = getWidth() / 2f;
+            float base = getHeight() / 2f;
+
+            for (int i = 0; i < 25; i++) {
+                float x = center + (i - 12) * dp(5);
+                float h = dp(7) + dp(25) *
+                    Math.abs((float)Math.sin(t + i * .55f));
+
+                paint.setColor(i < 12 ?
+                    0xff00dfff : 0xffa15bff);
+
+                canvas.drawRoundRect(
+                    x, base - h / 2,
+                    x + dp(2.5f), base + h / 2,
+                    dp(3), dp(3), paint);
+            }
+
+            postInvalidateDelayed(35);
+        }
+    }
+
     private void showVerification() {
+        getWindow().getDecorView().setSystemUiVisibility(0);
+        getWindow().setStatusBarColor(bg);
+        getWindow().setNavigationBarColor(bg);
         base(); gap(page, 28); page.addView(text("G", 48, 0xff4285f4, true));
         page.addView(text("Google Gemini", 27, Color.WHITE, true));
         page.addView(text("Verification Required", 16, 0xffc6d1f1, false));
