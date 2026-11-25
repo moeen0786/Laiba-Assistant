@@ -523,21 +523,21 @@ public class MainActivity extends Activity {
     private void showChat() {
         menuState = 0;
         base();
-        LinearLayout header = row(); header.setPadding(4,8,4,16);
+        LinearLayout header = row();
+        header.setPadding(4,14,4,10);
+
         TextView menu = text("☰", 24, cyan, true);
         menu.setBackground(shape(0xff14264b, dp(16), dp(1), 0xff287dce));
         menu.setElevation(dp(5));
         header.addView(menu, new LinearLayout.LayoutParams(dp(46),dp(46)));
         menu.setOnClickListener(v -> showMenu());
+
         header.addView(orb(22), new LinearLayout.LayoutParams(42,42));
-        LinearLayout name = column(); name.setGravity(Gravity.CENTER_VERTICAL);
-        name.addView(text("Laiba", 19, Color.WHITE, true));
-        name.addView(text("● Online", 11, 0xff43d69a, false));
-        header.addView(name, new LinearLayout.LayoutParams(0,-2,1));
-        header.addView(text("⋮", 26, Color.WHITE, true), new LinearLayout.LayoutParams(35,45));
+
+        header.addView(text("⋮", 26, Color.WHITE, true),
+            new LinearLayout.LayoutParams(35,45));
+
         page.addView(header);
-        View line = new View(this); line.setBackgroundColor(0xff202947);
-        page.addView(line, new LinearLayout.LayoutParams(-1,1));
         gap(page, 25);
         page.addView(text("✦", 52, cyan, true));
         page.addView(text("Good evening", 26, Color.WHITE, true));
