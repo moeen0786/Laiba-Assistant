@@ -15,7 +15,6 @@ import androidx.credentials.exceptions.GetCredentialException;
 
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption;
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
-import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException;
 
 import java.util.concurrent.Executor;
 
@@ -520,8 +519,7 @@ public class MainActivity extends Activity {
                             return;
                         }
 
-                        try {
-                            GoogleIdTokenCredential google =
+                        GoogleIdTokenCredential google =
                                 GoogleIdTokenCredential.createFrom(custom.getData());
 
                             googleIdToken = google.getIdToken();
@@ -544,9 +542,6 @@ public class MainActivity extends Activity {
                                 + "\nServer verification is not connected yet."
                             );
                             choose.setText("Choose another account");
-                        } catch (GoogleIdTokenParsingException e) {
-                            status.setText("Could not read Google's ID Token. Please try again.");
-                        }
                     }
 
                     @Override
