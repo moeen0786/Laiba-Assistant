@@ -97,6 +97,8 @@ public class MainActivity extends Activity {
         page.setGravity(Gravity.CENTER_HORIZONTAL);
 
         root.addView(page, new FrameLayout.LayoutParams(-1, -1));
+        root.addView(new SplashHeartsView(),
+            new FrameLayout.LayoutParams(-1, -1));
         setContentView(root);
 
         View topSpace = new View(this);
@@ -186,6 +188,49 @@ public class MainActivity extends Activity {
             });
 
         root.post(loadingAnimator::start);
+    }
+
+
+    // Animated falling hearts: UI-only splash decoration.
+    private class SplashHeartsView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final long start = System.currentTimeMillis();
+        private final int[] colors = {
+            0xffff5b91, 0xffff83b0, 0xffe85cff, 0xffff4778
+        };
+
+        SplashHeartsView() {
+            super(MainActivity.this);
+            setClickable(false);
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+
+            float elapsed = (System.currentTimeMillis() - start) / 1000f;
+            float width = getWidth();
+            float height = getHeight();
+
+            paint.setTypeface(Typeface.DEFAULT);
+            paint.setTextAlign(Paint.Align.CENTER);
+
+            for (int i = 0; i < 16; i++) {
+                float speed = dp(35 + (i % 5) * 12);
+                float phase = (i * height / 16f);
+                float y = (elapsed * speed + phase)
+                    % (height + dp(40)) - dp(20);
+
+                float x = width * ((i * 73 % 100) / 100f);
+                x += (float)Math.sin(elapsed * 1.2f + i) * dp(9);
+
+                paint.setColor(colors[i % colors.length]);
+                paint.setAlpha(175);
+                paint.setTextSize(dp(12 + (i % 4) * 2));
+                canvas.drawText("♥", x, y, paint);
+            }
+
+            postInvalidateDelayed(32);
+        }
     }
 
     private class SplashOrbView extends View {
