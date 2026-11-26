@@ -701,17 +701,26 @@ public class MainActivity extends Activity {
     private void showChat() {
         menuState = 0;
 
-        // Restore normal status bar after fullscreen splash.
-        getWindow().setStatusBarColor(bg);
-        getWindow().setNavigationBarColor(bg);
-        getWindow().getDecorView().setSystemUiVisibility(
-            View.SYSTEM_UI_FLAG_FULLSCREEN |
-            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
-            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY |
-            View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
-            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
-            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-        );
+        // Modern immersive fullscreen for Android 11 and newer.
+        // Automatically covers Android 16, 17 and future versions.
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+            getWindow().setStatusBarColor(Color.TRANSPARENT);
+            getWindow().setNavigationBarColor(Color.TRANSPARENT);
+            getWindow().setStatusBarContrastEnforced(false);
+            getWindow().setNavigationBarContrastEnforced(false);
+        } else {
+            getWindow().setStatusBarColor(bg);
+            getWindow().setNavigationBarColor(bg);
+            getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_FULLSCREEN |
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY |
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+            );
+        }
 
         base();
 
@@ -727,16 +736,51 @@ public class MainActivity extends Activity {
         );
         root.setBackground(premiumBg);
 
-        // Keep chat content below the Android status bar.
-        root.setOnApplyWindowInsetsListener((v, insets) -> {
-            int topInset = insets.getSystemWindowInsetTop();
-            page.setPadding(
-                dp(22), topInset + dp(18),
-                dp(22), dp(18)
-            );
-            return insets;
-        });
+        // Respect display cutouts, system bars and keyboard on modern Android.
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            root.setOnApplyWindowInsetsListener((v, insets) -> {
+                android.graphics.Insets safe = insets.getInsetsIgnoringVisibility(
+                    android.view.WindowInsets.Type.statusBars()
+                    | android.view.WindowInsets.Type.navigationBars()
+                    | android.view.WindowInsets.Type.displayCutout()
+                );
+                int imeBottom = insets.getInsets(
+                    android.view.WindowInsets.Type.ime()
+                ).bottom;
+                page.setPadding(
+                    dp(22), safe.top + dp(18),
+                    dp(22), Math.max(safe.bottom, imeBottom) + dp(18)
+                );
+                return insets;
+            });
+        } else {
+            root.setOnApplyWindowInsetsListener((v, insets) -> {
+                int topInset = insets.getSystemWindowInsetTop();
+                page.setPadding(
+                    dp(22), topInset + dp(18),
+                    dp(22), dp(18)
+                );
+                return insets;
+            });
+        }
         root.requestApplyInsets();
+
+        // Hide system bars after the chat view is attached.
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            root.post(() -> {
+                android.view.WindowInsetsController controller =
+                    getWindow().getInsetsController();
+                if (controller != null) {
+                    controller.setSystemBarsBehavior(
+                        android.view.WindowInsetsController
+                            .BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    );
+                    controller.hide(
+                        android.view.WindowInsets.Type.systemBars()
+                    );
+                }
+            });
+        }
 
         LinearLayout header = row();
         header.setPadding(4,14,4,4);
