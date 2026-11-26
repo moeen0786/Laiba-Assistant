@@ -629,7 +629,7 @@ public class MainActivity extends Activity {
 
         ImageView laibaIcon = new ImageView(this);
         laibaIcon.setImageDrawable(
-            getPackageManager().getApplicationIcon(getPackageName())
+            getPackageManager().getApplicationIcon(getApplicationInfo())
         );
         laibaIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         laibaIcon.setPadding(dp(5), dp(5), dp(5), dp(5));
