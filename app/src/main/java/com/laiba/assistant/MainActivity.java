@@ -701,21 +701,23 @@ public class MainActivity extends Activity {
     private void showChat() {
         menuState = 0;
 
-        // Modern immersive fullscreen for Android 11 and newer.
-        // Automatically covers Android 16, 17 and future versions.
+        // Edge-to-Edge: keep system bars visible and handle their insets.
         if (android.os.Build.VERSION.SDK_INT >= 30) {
             getWindow().setDecorFitsSystemWindows(false);
             getWindow().setStatusBarColor(Color.TRANSPARENT);
             getWindow().setNavigationBarColor(Color.TRANSPARENT);
             getWindow().setStatusBarContrastEnforced(false);
             getWindow().setNavigationBarContrastEnforced(false);
+
+            android.view.WindowInsetsController controller =
+                getWindow().getInsetsController();
+            if (controller != null) {
+                controller.show(android.view.WindowInsets.Type.systemBars());
+            }
         } else {
             getWindow().setStatusBarColor(bg);
             getWindow().setNavigationBarColor(bg);
             getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_FULLSCREEN |
-                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY |
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
                 View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
@@ -736,63 +738,42 @@ public class MainActivity extends Activity {
         );
         root.setBackground(premiumBg);
 
-        // Respect display cutouts, system bars and keyboard on modern Android.
+        // Apply visible system-bar, display-cutout and keyboard insets.
         if (android.os.Build.VERSION.SDK_INT >= 30) {
             root.setOnApplyWindowInsetsListener((v, insets) -> {
-                android.graphics.Insets safe = insets.getInsetsIgnoringVisibility(
-                    android.view.WindowInsets.Type.statusBars()
+                int bars = android.view.WindowInsets.Type.statusBars()
                     | android.view.WindowInsets.Type.navigationBars()
-                    | android.view.WindowInsets.Type.displayCutout()
-                );
+                    | android.view.WindowInsets.Type.displayCutout();
+
+                android.graphics.Insets safe = insets.getInsets(bars);
                 int imeBottom = insets.getInsets(
                     android.view.WindowInsets.Type.ime()
                 ).bottom;
+
                 page.setPadding(
-                    dp(22), safe.top + dp(18),
-                    dp(22), Math.max(safe.bottom, imeBottom) + dp(18)
+                    dp(22), safe.top + dp(12),
+                    dp(22), Math.max(safe.bottom, imeBottom) + dp(12)
                 );
                 return insets;
             });
         } else {
             root.setOnApplyWindowInsetsListener((v, insets) -> {
-                int topInset = insets.getSystemWindowInsetTop();
                 page.setPadding(
-                    dp(22), topInset + dp(18),
-                    dp(22), dp(18)
+                    dp(22), insets.getSystemWindowInsetTop() + dp(12),
+                    dp(22), insets.getSystemWindowInsetBottom() + dp(12)
                 );
                 return insets;
             });
         }
         root.requestApplyInsets();
 
-        // Android 15+ (API 35+): Native Edge-to-Edge.
-        // Keep transparent system bars visible; content extends behind them.
-        // Android 11-14: Preserve existing immersive fullscreen behavior.
-        if (android.os.Build.VERSION.SDK_INT >= 30 &&
-            android.os.Build.VERSION.SDK_INT < 35) {
-            root.post(() -> {
-                android.view.WindowInsetsController controller =
-                    getWindow().getInsetsController();
-                if (controller != null) {
-                    controller.setSystemBarsBehavior(
-                        android.view.WindowInsetsController
-                            .BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                    );
-                    controller.hide(
-                        android.view.WindowInsets.Type.systemBars()
-                    );
-                }
-            });
-        }
-
         LinearLayout header = row();
-        header.setPadding(4,14,4,4);
+        header.setPadding(dp(4), dp(8), dp(4), dp(4));
 
         TextView menu = text("☰", 24, cyan, true);
         menu.setBackground(shape(0xff172b50, dp(21), dp(1), 0xff4b9cff));
         menu.setElevation(dp(5));
         menu.setTranslationX(-dp(12));
-        menu.setTranslationY(-dp(5));
         header.addView(menu, new LinearLayout.LayoutParams(dp(46),dp(46)));
         menu.setOnClickListener(v -> showMenu());
 
