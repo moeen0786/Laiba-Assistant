@@ -700,6 +700,7 @@ public class MainActivity extends Activity {
     }
     private void showChat() {
         menuState = 0;
+        setupPage = -1;
 
         // Edge-to-Edge: keep system bars visible and handle their insets.
         if (android.os.Build.VERSION.SDK_INT >= 30) {
@@ -1006,8 +1007,16 @@ public class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
-        if (menuState == 2) showMenu();
-        else if (menuState == 1) showChat();
-        else showChat();
+        if (menuState == 2) {
+            showMenu();
+        } else if (menuState == 1) {
+            showChat();
+        } else if (setupPage == 1 || setupPage == 2) {
+            showVerification();
+        } else if (setupPage == 0) {
+            // Stay on verification; never bypass it with Back.
+        } else {
+            super.onBackPressed();
+        }
     }
 }
