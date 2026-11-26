@@ -98,6 +98,25 @@ public class MainActivity extends Activity {
         o.setBackground(g); o.setElevation(18); return o;
     }
 
+    private TextView createBackButton() {
+        TextView back = text("‹", 34, Color.WHITE, true);
+        back.setGravity(Gravity.CENTER);
+        back.setIncludeFontPadding(false);
+        back.setContentDescription("Back");
+
+        GradientDrawable gradient = new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            new int[]{cyan, blue, purple}
+        );
+        gradient.setShape(GradientDrawable.OVAL);
+        gradient.setStroke(dp(1.5f), 0xffc5f4ff);
+
+        back.setBackground(gradient);
+        back.setElevation(dp(8));
+        back.setTranslationY(dp(15));
+        return back;
+    }
+
     private void showSplash() {
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
@@ -442,7 +461,7 @@ public class MainActivity extends Activity {
 
     private void authHeader(String title) {
         LinearLayout header = row();
-        TextView back = text("‹", 34, cyan, true);
+        TextView back = createBackButton();
         header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
         back.setOnClickListener(v -> showVerification());
 
@@ -1036,7 +1055,7 @@ public class MainActivity extends Activity {
         base();
 
         LinearLayout header = row();
-        TextView back = text("‹", 34, cyan, true);
+        TextView back = createBackButton();
         header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
         back.setOnClickListener(v -> showChat());
 
@@ -1088,7 +1107,7 @@ public class MainActivity extends Activity {
         base();
 
         LinearLayout header = row();
-        TextView back = text("‹", 34, cyan, true);
+        TextView back = createBackButton();
         header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
         back.setOnClickListener(v -> showMenu());
         header.addView(text("COMMAND CENTER", 14, Color.WHITE, true));
