@@ -435,6 +435,9 @@ public class MainActivity extends Activity {
     private void authHeader(String title) {
         LinearLayout header = row();
         TextView back = text("←", 30, cyan, true);
+        back.setBackground(shape(0xff153b59, dp(24), dp(1), 0xff38bdf8));
+        back.setElevation(dp(4));
+        back.setTranslationY(dp(4));
         header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
         back.setOnClickListener(v -> showVerification());
 
@@ -869,6 +872,9 @@ public class MainActivity extends Activity {
 
         LinearLayout header = row();
         TextView back = text("←", 30, cyan, true);
+        back.setBackground(shape(0xff153b59, dp(24), dp(1), 0xff38bdf8));
+        back.setElevation(dp(4));
+        back.setTranslationY(dp(4));
         header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
         back.setOnClickListener(v -> showChat());
 
@@ -921,6 +927,9 @@ public class MainActivity extends Activity {
 
         LinearLayout header = row();
         TextView back = text("←", 30, cyan, true);
+        back.setBackground(shape(0xff153b59, dp(24), dp(1), 0xff38bdf8));
+        back.setElevation(dp(4));
+        back.setTranslationY(dp(4));
         header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
         back.setOnClickListener(v -> showMenu());
         header.addView(text("COMMAND CENTER", 14, Color.WHITE, true));
