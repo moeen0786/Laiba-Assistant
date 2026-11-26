@@ -532,6 +532,18 @@ public class MainActivity extends Activity {
 
         base();
 
+        // Premium navy, royal blue and subtle warm-gold background.
+        GradientDrawable premiumBg = new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            new int[]{
+                0xff040714,
+                0xff0b1a35,
+                0xff171a2b,
+                0xff211d25
+            }
+        );
+        root.setBackground(premiumBg);
+
         // Keep chat content below the Android status bar.
         root.setOnApplyWindowInsetsListener((v, insets) -> {
             int topInset = insets.getSystemWindowInsetTop();
@@ -544,7 +556,7 @@ public class MainActivity extends Activity {
         root.requestApplyInsets();
 
         LinearLayout header = row();
-        header.setPadding(4,14,4,10);
+        header.setPadding(4,14,4,4);
 
         TextView menu = text("☰", 24, cyan, true);
         menu.setBackground(shape(0xff172b50, dp(21), dp(1), 0xff4b9cff));
@@ -560,11 +572,48 @@ public class MainActivity extends Activity {
             new LinearLayout.LayoutParams(35,45));
 
         page.addView(header);
-        gap(page, 25);
-        page.addView(text("✦", 52, cyan, true));
-        page.addView(text("Good evening", 26, Color.WHITE, true));
-        page.addView(text("How can I help you today?", 16, 0xffaab8df, false));
-        gap(page, 32);
+        gap(page, 6);
+        page.addView(text("✦", 46, cyan, true));
+        page.addView(text("Good evening", 24, Color.WHITE, true));
+        page.addView(text("How can I help you today?", 14, 0xffaab8df, false));
+
+        // Temporary welcome message: UI only, not saved as chat history.
+        gap(page, 12);
+        LinearLayout welcomeRow = row();
+        welcomeRow.setGravity(Gravity.TOP | Gravity.LEFT);
+
+        ImageView laibaIcon = new ImageView(this);
+        laibaIcon.setImageDrawable(
+            getPackageManager().getApplicationIcon(getPackageName())
+        );
+        laibaIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        laibaIcon.setPadding(dp(5), dp(5), dp(5), dp(5));
+        laibaIcon.setBackground(
+            shape(0xff203b68, dp(18), dp(1), 0xff3279c8)
+        );
+        LinearLayout.LayoutParams iconParams =
+            new LinearLayout.LayoutParams(dp(38), dp(38));
+        iconParams.rightMargin = dp(8);
+        welcomeRow.addView(laibaIcon, iconParams);
+
+        TextView welcomeMessage = text(
+            "السلام علیکم! میں لائبہ ہوں۔\n" +
+            "آپ کی ذاتی AI اسسٹنٹ۔ بتائیے، آج میں آپ کی کیا مدد کر سکتی ہوں؟",
+            14, 0xffe7efff, false
+        );
+        welcomeMessage.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+        welcomeMessage.setPadding(dp(13), dp(11), dp(13), dp(11));
+        welcomeMessage.setBackground(
+            shape(0xff192640, dp(18), dp(1), 0xff30496c)
+        );
+        welcomeRow.addView(
+            welcomeMessage,
+            new LinearLayout.LayoutParams(0, -2, 1)
+        );
+
+        page.addView(welcomeRow,
+            new LinearLayout.LayoutParams(-1, -2));
+        gap(page, 16);
         View spacer = new View(this); page.addView(spacer,new LinearLayout.LayoutParams(1,0,1));
         LinearLayout composer = row();
         composer.setPadding(dp(10), dp(6), dp(8), dp(6));
