@@ -765,8 +765,11 @@ public class MainActivity extends Activity {
         }
         root.requestApplyInsets();
 
-        // Hide system bars after the chat view is attached.
-        if (android.os.Build.VERSION.SDK_INT >= 30) {
+        // Android 15+ (API 35+): Native Edge-to-Edge.
+        // Keep transparent system bars visible; content extends behind them.
+        // Android 11-14: Preserve existing immersive fullscreen behavior.
+        if (android.os.Build.VERSION.SDK_INT >= 30 &&
+            android.os.Build.VERSION.SDK_INT < 35) {
             root.post(() -> {
                 android.view.WindowInsetsController controller =
                     getWindow().getInsetsController();
