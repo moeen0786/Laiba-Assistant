@@ -10,6 +10,10 @@ on:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 
+concurrency:
+  group: laiba-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   pull-requests: write
@@ -35,12 +39,12 @@ jobs:
 
   build:
     if: >-
-      (github.event_name == 'push' &&
-       (github.ref == 'refs/heads/laiba-self-development' ||
-        github.ref == 'refs/heads/main')) ||
       (github.event_name == 'pull_request' &&
        github.event.pull_request.base.ref == 'main' &&
+       github.event.pull_request.head.ref == 'laiba-self-development' &&
        github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'push' &&
+       github.ref == 'refs/heads/main') ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
