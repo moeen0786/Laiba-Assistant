@@ -1,6 +1,23 @@
 package com.laiba.assistant;
 
 import android.app.Activity;
+import android.os.CancellationSignal;
+import android.os.Handler;
+import android.os.Looper;
+
+import androidx.credentials.Credential;
+import androidx.credentials.CredentialManager;
+import androidx.credentials.CredentialManagerCallback;
+import androidx.credentials.CustomCredential;
+import androidx.credentials.GetCredentialRequest;
+import androidx.credentials.GetCredentialResponse;
+import androidx.credentials.exceptions.GetCredentialException;
+
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption;
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
+import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException;
+
+import java.util.concurrent.Executor;
 
 import android.animation.ValueAnimator;
 import android.graphics.Canvas;
@@ -29,6 +46,13 @@ public class MainActivity extends Activity {
     private LinearLayout page;
     private int menuState = 0;
     private int setupPage = 0;
+
+    private static final String WEB_CLIENT_ID =
+        "872193316354-fjssar2vf37gl00qlfrtbjdedou5914q.apps.googleusercontent.com";
+    private String googleIdToken;
+    private String googleAccountEmail;
+    private String googleAccountName;
+    private boolean googleSignInInProgress;
 
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
@@ -447,6 +471,103 @@ public class MainActivity extends Activity {
         page.addView(header);
     }
 
+    private void startGoogleSignIn(
+            TextView status, TextView choose, TextView add) {
+        if (googleSignInInProgress) return;
+
+        googleSignInInProgress = true;
+        status.setText("Opening secure Google sign-in...");
+        choose.setEnabled(false);
+        add.setEnabled(false);
+
+        try {
+            GetSignInWithGoogleOption option =
+                new GetSignInWithGoogleOption.Builder(WEB_CLIENT_ID).build();
+
+            GetCredentialRequest request =
+                new GetCredentialRequest.Builder()
+                    .addCredentialOption(option)
+                    .build();
+
+            Executor mainExecutor =
+                command -> new Handler(Looper.getMainLooper()).post(command);
+
+            CredentialManager manager = CredentialManager.create(this);
+
+            manager.getCredentialAsync(
+                this,
+                request,
+                new CancellationSignal(),
+                mainExecutor,
+                new CredentialManagerCallback<GetCredentialResponse,
+                        GetCredentialException>() {
+                    @Override
+                    public void onResult(GetCredentialResponse result) {
+                        googleSignInInProgress = false;
+                        choose.setEnabled(true);
+                        add.setEnabled(true);
+
+                        Credential credential = result.getCredential();
+                        if (!(credential instanceof CustomCredential)) {
+                            status.setText("Google returned an unsupported credential.");
+                            return;
+                        }
+
+                        CustomCredential custom = (CustomCredential) credential;
+                        if (!GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+                                .equals(custom.getType())) {
+                            status.setText("Google ID Token was not returned.");
+                            return;
+                        }
+
+                        try {
+                            GoogleIdTokenCredential google =
+                                GoogleIdTokenCredential.createFrom(custom.getData());
+
+                            googleIdToken = google.getIdToken();
+                            googleAccountEmail = google.getId();
+                            googleAccountName = google.getDisplayName();
+
+                            if (googleIdToken == null || googleIdToken.isEmpty()) {
+                                status.setText("Google sign-in completed, but ID Token is empty.");
+                                return;
+                            }
+
+                            String account = (googleAccountName == null
+                                    || googleAccountName.trim().isEmpty())
+                                ? googleAccountEmail
+                                : googleAccountName + "\n" + googleAccountEmail;
+
+                            status.setText(
+                                "Google sign-in successful\n" + account
+                                + "\nID Token received in app memory."
+                                + "\nServer verification is not connected yet."
+                            );
+                            choose.setText("Choose another account");
+                        } catch (GoogleIdTokenParsingException e) {
+                            status.setText("Could not read Google's ID Token. Please try again.");
+                        }
+                    }
+
+                    @Override
+                    public void onError(GetCredentialException error) {
+                        googleSignInInProgress = false;
+                        choose.setEnabled(true);
+                        add.setEnabled(true);
+                        status.setText(
+                            "Google sign-in cancelled or failed. Tap a button to try again."
+                        );
+                    }
+                }
+            );
+        } catch (Exception e) {
+            googleSignInInProgress = false;
+            choose.setEnabled(true);
+            add.setEnabled(true);
+            status.setText("Could not start Google sign-in. Please try again.");
+        }
+    }
+
     private void showGoogleAccountPage() {
         setupPage = 1;
         base();
@@ -475,12 +596,11 @@ public class MainActivity extends Activity {
         card.addView(accountIcon,
             new LinearLayout.LayoutParams(dp(58), dp(58)));
         gap(card, dp(12));
-        card.addView(text("Accounts on this device",
+        card.addView(text("Google secure account selection",
             17, Color.WHITE, true));
         gap(card, dp(6));
         card.addView(text(
-            "Your phone's Google accounts will appear here\\n" +
-            "when secure account selection is connected.",
+            "Android will display the available Google accounts securely.",
             12, 0xffaab8df, false));
         gap(card, dp(15));
 
@@ -495,12 +615,20 @@ public class MainActivity extends Activity {
         card.addView(add, new LinearLayout.LayoutParams(-1, -2));
 
         page.addView(card, new LinearLayout.LayoutParams(-1, -2));
+
         gap(page, dp(12));
-        page.addView(text("UI PREVIEW ONLY • Google sign-in is inactive",
-            11, 0xff8296c2, false));
+        TextView status = text(
+            "Google sign-in is ready. Choose an account to continue.",
+            12, 0xffaab8df, false);
+        page.addView(status, new LinearLayout.LayoutParams(-1, -2));
 
         View bottom = new View(this);
         page.addView(bottom, new LinearLayout.LayoutParams(1, 0, .2f));
+
+        choose.setOnClickListener(
+            v -> startGoogleSignIn(status, choose, add));
+        add.setOnClickListener(
+            v -> startGoogleSignIn(status, choose, add));
     }
 
     private void showApiKeyPage() {
