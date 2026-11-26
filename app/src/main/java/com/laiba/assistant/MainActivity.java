@@ -779,6 +779,7 @@ public class MainActivity extends Activity {
             "آپ کی ذاتی AI اسسٹنٹ۔ بتائیے، آج میں آپ کی کیا مدد کر سکتی ہوں؟",
             14, 0xffe7efff, false
         );
+        welcomeMessage.setTextIsSelectable(true);
         welcomeMessage.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         welcomeMessage.setPadding(dp(13), dp(11), dp(13), dp(11));
         welcomeMessage.setBackground(
