@@ -28,6 +28,7 @@ public class MainActivity extends Activity {
     private FrameLayout root;
     private LinearLayout page;
     private int menuState = 0;
+    private int setupPage = 0;
 
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
@@ -330,6 +331,7 @@ public class MainActivity extends Activity {
 
 
     private void showVerification() {
+        setupPage = 0;
         getWindow().getDecorView().setSystemUiVisibility(
             View.SYSTEM_UI_FLAG_FULLSCREEN |
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
@@ -424,7 +426,138 @@ public class MainActivity extends Activity {
         page.addView(bottomSpace,
             new LinearLayout.LayoutParams(1, 0, 0.3f));
 
-        // UI-only preview. No login, API, or button actions are connected.
+        google.setOnClickListener(v -> showGoogleAccountPage());
+        api.setOnClickListener(v -> showApiKeyPage());
+
+        // Google login and API verification remain inactive.
+    }
+
+    private void authHeader(String title) {
+        LinearLayout header = row();
+        TextView back = text("‹", 34, cyan, true);
+        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        back.setOnClickListener(v -> showVerification());
+
+        LinearLayout labels = column();
+        labels.setGravity(Gravity.CENTER_VERTICAL);
+        labels.addView(text("LAIBA", 17, Color.WHITE, true));
+        labels.addView(text(title, 11, cyan, true));
+        header.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
+        header.addView(orb(19), new LinearLayout.LayoutParams(dp(42), dp(42)));
+        page.addView(header);
+    }
+
+    private void showGoogleAccountPage() {
+        setupPage = 1;
+        base();
+        authHeader("GOOGLE ACCOUNT");
+
+        View spacer = new View(this);
+        page.addView(spacer, new LinearLayout.LayoutParams(1, 0, .18f));
+
+        page.addView(orb(38),
+            new LinearLayout.LayoutParams(dp(82), dp(82)));
+        gap(page, dp(18));
+        page.addView(text("Choose your Google Account",
+            23, Color.WHITE, true));
+        gap(page, dp(7));
+        page.addView(text("Select an account to connect with Laiba.",
+            13, 0xffaab8df, false));
+
+        gap(page, dp(22));
+        LinearLayout card = column();
+        card.setGravity(Gravity.CENTER);
+        card.setPadding(dp(16), dp(20), dp(16), dp(20));
+        card.setBackground(shape(panel, dp(22), dp(1), 0xff315bce));
+
+        TextView accountIcon = text("G", 28, Color.WHITE, true);
+        accountIcon.setBackground(shape(0xff263d70, dp(30), dp(1), 0xff4b9cff));
+        card.addView(accountIcon,
+            new LinearLayout.LayoutParams(dp(58), dp(58)));
+        gap(card, dp(12));
+        card.addView(text("Accounts on this device",
+            17, Color.WHITE, true));
+        gap(card, dp(6));
+        card.addView(text(
+            "Your phone's Google accounts will appear here
+when secure account selection is connected.",
+            12, 0xffaab8df, false));
+        gap(card, dp(15));
+
+        TextView choose = pill("Choose an account", blue);
+        card.addView(choose, new LinearLayout.LayoutParams(-1, -2));
+        gap(card, dp(9));
+
+        TextView add = text("+   Add another Google account",
+            14, 0xffdce7ff, true);
+        add.setPadding(dp(10), dp(13), dp(10), dp(13));
+        add.setBackground(shape(bg, dp(16), dp(1), cyan));
+        card.addView(add, new LinearLayout.LayoutParams(-1, -2));
+
+        page.addView(card, new LinearLayout.LayoutParams(-1, -2));
+        gap(page, dp(12));
+        page.addView(text("UI PREVIEW ONLY • Google sign-in is inactive",
+            11, 0xff8296c2, false));
+
+        View bottom = new View(this);
+        page.addView(bottom, new LinearLayout.LayoutParams(1, 0, .2f));
+    }
+
+    private void showApiKeyPage() {
+        setupPage = 2;
+        base();
+        authHeader("GEMINI API SETUP");
+
+        View spacer = new View(this);
+        page.addView(spacer, new LinearLayout.LayoutParams(1, 0, .2f));
+
+        page.addView(orb(35),
+            new LinearLayout.LayoutParams(dp(76), dp(76)));
+        gap(page, dp(18));
+        page.addView(text("Connect Gemini API",
+            23, Color.WHITE, true));
+        gap(page, dp(7));
+        page.addView(text("Enter your Gemini API key below.",
+            13, 0xffaab8df, false));
+
+        gap(page, dp(22));
+        LinearLayout card = column();
+        card.setPadding(dp(16), dp(20), dp(16), dp(20));
+        card.setBackground(shape(panel, dp(22), dp(1), 0xff315bce));
+
+        TextView label = text("Gemini API Key", 14, Color.WHITE, true);
+        label.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+        card.addView(label);
+        gap(card, dp(10));
+
+        EditText keyInput = new EditText(this);
+        keyInput.setSingleLine(true);
+        keyInput.setTextSize(14);
+        keyInput.setTextColor(Color.WHITE);
+        keyInput.setHintTextColor(0xff8296c2);
+        keyInput.setHint("Enter API key");
+        keyInput.setInputType( android.text.InputType.TYPE_CLASS_TEXT
+            | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        keyInput.setPadding(dp(14), dp(13), dp(14), dp(13));
+        keyInput.setBackground(shape(bg, dp(14), dp(1), 0xff42659d));
+        card.addView(keyInput, new LinearLayout.LayoutParams(-1, -2));
+        gap(card, dp(15));
+
+        TextView continueButton = pill("Continue", blue);
+        card.addView(continueButton,
+            new LinearLayout.LayoutParams(-1, -2));
+
+        gap(card, dp(9));
+        card.addView(text("The key is not saved or verified in this preview.",
+            11, 0xffaab8df, false));
+
+        page.addView(card, new LinearLayout.LayoutParams(-1, -2));
+        gap(page, dp(12));
+        page.addView(text("UI PREVIEW ONLY • API verification is inactive",
+            11, 0xff8296c2, false));
+
+        View bottom = new View(this);
+        page.addView(bottom, new LinearLayout.LayoutParams(1, 0, .2f));
     }
 
     private void showCallScreen() {
