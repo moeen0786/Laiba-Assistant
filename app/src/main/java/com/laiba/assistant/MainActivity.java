@@ -2,6 +2,21 @@ package com.laiba.assistant;
 
 import android.app.Activity;
 
+import android.os.Build;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
+import android.util.Base64;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.security.KeyStore;
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
+
+
 
 
 
@@ -188,7 +203,7 @@ public class MainActivity extends Activity {
                 @Override
                 public void onAnimationEnd(
                     android.animation.Animator animation) {
-                    showVerification();
+                    startStoredKeyCheck();
                 }
             });
 
@@ -440,29 +455,172 @@ public class MainActivity extends Activity {
         page.addView(header);
     }
 
+
+    private static final String SAFE_KEY_ALIAS = "LaibaGeminiSafeKey";
+
+    private SecretKey getSafeEncryptionKey() throws Exception {
+        KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
+        ks.load(null);
+
+        if (ks.containsAlias(SAFE_KEY_ALIAS)) {
+            return (SecretKey) ks.getKey(SAFE_KEY_ALIAS, null);
+        }
+
+        KeyGenerator generator = KeyGenerator.getInstance(
+            KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+
+        generator.init(new KeyGenParameterSpec.Builder(
+            SAFE_KEY_ALIAS,
+            KeyProperties.PURPOSE_ENCRYPT |
+            KeyProperties.PURPOSE_DECRYPT)
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(
+                KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setRandomizedEncryptionRequired(true)
+            .build());
+
+        return generator.generateKey();
+    }
+
+    private void saveApiKeySecurely(String apiKey) throws Exception {
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.ENCRYPT_MODE, getSafeEncryptionKey());
+
+        byte[] encrypted = cipher.doFinal(
+            apiKey.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        File safeFolder = new File(getFilesDir(), "safe");
+        if (!safeFolder.exists() && !safeFolder.mkdirs()) {
+            throw new Exception("Secure storage unavailable");
+        }
+
+        File keyFile = new File(safeFolder, "gemini.key");
+        try (FileOutputStream out = new FileOutputStream(keyFile)) {
+            out.write(Base64.encode(cipher.getIV(), Base64.NO_WRAP));
+            out.write('\n');
+            out.write(Base64.encode(encrypted, Base64.NO_WRAP));
+            out.flush();
+            keyFile.setReadable(false, false);
+            keyFile.setWritable(false, false);
+            keyFile.setReadable(true, true);
+            keyFile.setWritable(true, true);
+        }
+    }
+
+
+    private String loadApiKeySecurely() throws Exception {
+        File file = new File(new File(getFilesDir(), "safe"), "gemini.key");
+        if (!file.isFile()) return null;
+
+        java.io.BufferedReader reader = new java.io.BufferedReader(
+            new java.io.InputStreamReader(
+                new java.io.FileInputStream(file),
+                java.nio.charset.StandardCharsets.UTF_8));
+
+        String ivLine;
+        String encryptedLine;
+        try {
+            ivLine = reader.readLine();
+            encryptedLine = reader.readLine();
+        } finally {
+            reader.close();
+        }
+
+        if (ivLine == null || encryptedLine == null) return null;
+
+        byte[] iv = Base64.decode(ivLine, Base64.NO_WRAP);
+        byte[] encrypted = Base64.decode(encryptedLine, Base64.NO_WRAP);
+
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.DECRYPT_MODE, getSafeEncryptionKey(),
+            new GCMParameterSpec(128, iv));
+
+        return new String(cipher.doFinal(encrypted),
+            java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private void startStoredKeyCheck() {
+        new Thread(() -> {
+            try {
+                String key = loadApiKeySecurely();
+                if (key == null || !verifyGoogleApiKey(key)) {
+                    runOnUiThread(this::showVerification);
+                    return;
+                }
+                runOnUiThread(this::showApiReadyPage);
+            } catch (Exception e) {
+                runOnUiThread(this::showVerification);
+            }
+        }).start();
+    }
+
+    private boolean verifyGoogleApiKey(String apiKey) throws Exception {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(
+                "https://generativelanguage.googleapis.com/v1beta/models");
+
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("x-goog-api-key", apiKey);
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(15000);
+            connection.setInstanceFollowRedirects(false);
+
+            return connection.getResponseCode() == 200;
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private void showApiReadyPage() {
+        setupPage = 1;
+        base();
+        authHeader("API VERIFIED");
+
+        gap(page, dp(65));
+        page.addView(orb(40),
+            new LinearLayout.LayoutParams(dp(95), dp(95)));
+        gap(page, dp(25));
+
+        page.addView(text("Google API Connected",
+            23, Color.WHITE, true));
+        gap(page, dp(12));
+
+        page.addView(text(
+            "Your API key has been verified and securely stored.",
+            14, 0xffb8d5ff, false));
+
+        gap(page, dp(25));
+        page.addView(text("LAIBA API INTEGRATION READY",
+            13, cyan, true));
+    }
+
     private void showApiKeyPage() {
         setupPage = 2;
         base();
         authHeader("GEMINI API SETUP");
 
-        View spacer = new View(this);
-        page.addView(spacer, new LinearLayout.LayoutParams(1, 0, .2f));
-
+        gap(page, dp(30));
         page.addView(orb(35),
             new LinearLayout.LayoutParams(dp(76), dp(76)));
         gap(page, dp(18));
+
         page.addView(text("Connect Gemini API",
             23, Color.WHITE, true));
         gap(page, dp(7));
-        page.addView(text("Enter your Gemini API key below.",
+
+        page.addView(text("Enter your Google Gemini API key.",
             13, 0xffaab8df, false));
 
         gap(page, dp(22));
+
         LinearLayout card = column();
         card.setPadding(dp(16), dp(20), dp(16), dp(20));
         card.setBackground(shape(panel, dp(22), dp(1), 0xff315bce));
 
-        TextView label = text("Gemini API Key", 14, Color.WHITE, true);
+        TextView label = text("Gemini API Key",
+            14, Color.WHITE, true);
         label.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         card.addView(label);
         gap(card, dp(10));
@@ -473,28 +631,67 @@ public class MainActivity extends Activity {
         keyInput.setTextColor(Color.WHITE);
         keyInput.setHintTextColor(0xff8296c2);
         keyInput.setHint("Enter API key");
-        keyInput.setInputType( android.text.InputType.TYPE_CLASS_TEXT
-            | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        keyInput.setInputType(
+            android.text.InputType.TYPE_CLASS_TEXT |
+            android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
         keyInput.setPadding(dp(14), dp(13), dp(14), dp(13));
         keyInput.setBackground(shape(bg, dp(14), dp(1), 0xff42659d));
-        card.addView(keyInput, new LinearLayout.LayoutParams(-1, -2));
+        card.addView(keyInput,
+            new LinearLayout.LayoutParams(-1, -2));
+
         gap(card, dp(15));
 
-        TextView continueButton = pill("Continue", blue);
+        TextView continueButton = pill("Verify & Continue", blue);
         card.addView(continueButton,
             new LinearLayout.LayoutParams(-1, -2));
 
-        gap(card, dp(9));
-        card.addView(text("The key is not saved or verified in this preview.",
-            11, 0xffaab8df, false));
+        TextView status = text("", 12, 0xffaab8df, false);
+        card.addView(status);
+        page.addView(card,
+            new LinearLayout.LayoutParams(-1, -2));
 
-        page.addView(card, new LinearLayout.LayoutParams(-1, -2));
         gap(page, dp(12));
-        page.addView(text("UI PREVIEW ONLY • API verification is inactive",
+        page.addView(text("Encrypted Android private storage",
             11, 0xff8296c2, false));
 
-        View bottom = new View(this);
-        page.addView(bottom, new LinearLayout.LayoutParams(1, 0, .2f));
+        continueButton.setOnClickListener(v -> {
+            String key = keyInput.getText().toString().trim();
+
+            if (key.isEmpty() || key.length() < 20) {
+                status.setText("Please enter a valid API key.");
+                return;
+            }
+
+            continueButton.setEnabled(false);
+            status.setText("Verifying with Google...");
+
+            new Thread(() -> {
+                try {
+                    if (!verifyGoogleApiKey(key)) {
+                        runOnUiThread(() -> {
+                            continueButton.setEnabled(true);
+                            status.setText(
+                                "Google rejected this API key.");
+                        });
+                        return;
+                    }
+
+                    saveApiKeySecurely(key);
+
+                    runOnUiThread(() -> {
+                        keyInput.setText("");
+                        showApiReadyPage();
+                    });
+
+                } catch (Exception e) {
+                    runOnUiThread(() -> {
+                        continueButton.setEnabled(true);
+                        status.setText(
+                            "Verification or secure storage failed.");
+                    });
+                }
+            }).start();
+        });
     }
 
     private void showCallScreen() {
@@ -948,7 +1145,9 @@ public class MainActivity extends Activity {
             showMenu();
         } else if (menuState == 1) {
             showChat();
-        } else if (setupPage == 1 || setupPage == 2) {
+        } else if (setupPage == 1) {
+            showMenu();
+        } else if (setupPage == 2) {
             showVerification();
         } else if (setupPage == 0) {
             // Stay on verification; never bypass it with Back.
