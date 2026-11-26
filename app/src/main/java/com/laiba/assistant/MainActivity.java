@@ -547,7 +547,7 @@ public class MainActivity extends Activity {
                     runOnUiThread(this::showVerification);
                     return;
                 }
-                runOnUiThread(this::showApiReadyPage);
+                runOnUiThread(this::showChat);
             } catch (Exception e) {
                 runOnUiThread(this::showVerification);
             }
@@ -571,29 +571,6 @@ public class MainActivity extends Activity {
         } finally {
             if (connection != null) connection.disconnect();
         }
-    }
-
-    private void showApiReadyPage() {
-        setupPage = 1;
-        base();
-        authHeader("API VERIFIED");
-
-        gap(page, dp(65));
-        page.addView(orb(40),
-            new LinearLayout.LayoutParams(dp(95), dp(95)));
-        gap(page, dp(25));
-
-        page.addView(text("Google API Connected",
-            23, Color.WHITE, true));
-        gap(page, dp(12));
-
-        page.addView(text(
-            "Your API key has been verified and securely stored.",
-            14, 0xffb8d5ff, false));
-
-        gap(page, dp(25));
-        page.addView(text("LAIBA API INTEGRATION READY",
-            13, cyan, true));
     }
 
     private void showApiKeyPage() {
@@ -680,7 +657,7 @@ public class MainActivity extends Activity {
 
                     runOnUiThread(() -> {
                         keyInput.setText("");
-                        showApiReadyPage();
+                        showChat();
                     });
 
                 } catch (Exception e) {
