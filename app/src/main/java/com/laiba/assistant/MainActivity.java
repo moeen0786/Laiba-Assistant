@@ -97,6 +97,8 @@ public class MainActivity extends Activity {
         page.setGravity(Gravity.CENTER_HORIZONTAL);
 
         root.addView(page, new FrameLayout.LayoutParams(-1, -1));
+        root.addView(new SplashHeartsView(),
+            new FrameLayout.LayoutParams(-1, -1));
         setContentView(root);
 
         View topSpace = new View(this);
@@ -186,6 +188,49 @@ public class MainActivity extends Activity {
             });
 
         root.post(loadingAnimator::start);
+    }
+
+
+    // Animated falling hearts: UI-only splash decoration.
+    private class SplashHeartsView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final long start = System.currentTimeMillis();
+        private final int[] colors = {
+            0xffff5b91, 0xffff83b0, 0xffe85cff, 0xffff4778
+        };
+
+        SplashHeartsView() {
+            super(MainActivity.this);
+            setClickable(false);
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+
+            float elapsed = (System.currentTimeMillis() - start) / 1000f;
+            float width = getWidth();
+            float height = getHeight();
+
+            paint.setTypeface(Typeface.DEFAULT);
+            paint.setTextAlign(Paint.Align.CENTER);
+
+            for (int i = 0; i < 16; i++) {
+                float speed = dp(35 + (i % 5) * 12);
+                float phase = (i * height / 16f);
+                float y = (elapsed * speed + phase)
+                    % (height + dp(40)) - dp(20);
+
+                float x = width * ((i * 73 % 100) / 100f);
+                x += (float)Math.sin(elapsed * 1.2f + i) * dp(9);
+
+                paint.setColor(colors[i % colors.length]);
+                paint.setAlpha(175);
+                paint.setTextSize(dp(12 + (i % 4) * 2));
+                canvas.drawText("♥", x, y, paint);
+            }
+
+            postInvalidateDelayed(32);
+        }
     }
 
     private class SplashOrbView extends View {
@@ -532,6 +577,18 @@ public class MainActivity extends Activity {
 
         base();
 
+        // Premium navy, royal blue and subtle warm-gold background.
+        GradientDrawable premiumBg = new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            new int[]{
+                0xff040714,
+                0xff0b1a35,
+                0xff171a2b,
+                0xff211d25
+            }
+        );
+        root.setBackground(premiumBg);
+
         // Keep chat content below the Android status bar.
         root.setOnApplyWindowInsetsListener((v, insets) -> {
             int topInset = insets.getSystemWindowInsetTop();
@@ -544,7 +601,7 @@ public class MainActivity extends Activity {
         root.requestApplyInsets();
 
         LinearLayout header = row();
-        header.setPadding(4,14,4,10);
+        header.setPadding(4,14,4,4);
 
         TextView menu = text("☰", 24, cyan, true);
         menu.setBackground(shape(0xff172b50, dp(21), dp(1), 0xff4b9cff));
@@ -560,11 +617,48 @@ public class MainActivity extends Activity {
             new LinearLayout.LayoutParams(35,45));
 
         page.addView(header);
-        gap(page, 25);
-        page.addView(text("✦", 52, cyan, true));
-        page.addView(text("Good evening", 26, Color.WHITE, true));
-        page.addView(text("How can I help you today?", 16, 0xffaab8df, false));
-        gap(page, 32);
+        gap(page, 6);
+        page.addView(text("✦", 46, cyan, true));
+        page.addView(text("Good evening", 24, Color.WHITE, true));
+        page.addView(text("How can I help you today?", 14, 0xffaab8df, false));
+
+        // Temporary welcome message: UI only, not saved as chat history.
+        gap(page, 12);
+        LinearLayout welcomeRow = row();
+        welcomeRow.setGravity(Gravity.TOP | Gravity.LEFT);
+
+        ImageView laibaIcon = new ImageView(this);
+        laibaIcon.setImageDrawable(
+            getPackageManager().getApplicationIcon(getApplicationInfo())
+        );
+        laibaIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        laibaIcon.setPadding(dp(5), dp(5), dp(5), dp(5));
+        laibaIcon.setBackground(
+            shape(0xff203b68, dp(18), dp(1), 0xff3279c8)
+        );
+        LinearLayout.LayoutParams iconParams =
+            new LinearLayout.LayoutParams(dp(38), dp(38));
+        iconParams.rightMargin = dp(8);
+        welcomeRow.addView(laibaIcon, iconParams);
+
+        TextView welcomeMessage = text(
+            "السلام علیکم! میں لائبہ ہوں۔\n" +
+            "آپ کی ذاتی AI اسسٹنٹ۔ بتائیے، آج میں آپ کی کیا مدد کر سکتی ہوں؟",
+            14, 0xffe7efff, false
+        );
+        welcomeMessage.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+        welcomeMessage.setPadding(dp(13), dp(11), dp(13), dp(11));
+        welcomeMessage.setBackground(
+            shape(0xff192640, dp(18), dp(1), 0xff30496c)
+        );
+        welcomeRow.addView(
+            welcomeMessage,
+            new LinearLayout.LayoutParams(0, -2, 1)
+        );
+
+        page.addView(welcomeRow,
+            new LinearLayout.LayoutParams(-1, -2));
+        gap(page, 16);
         View spacer = new View(this); page.addView(spacer,new LinearLayout.LayoutParams(1,0,1));
         LinearLayout composer = row();
         composer.setPadding(dp(10), dp(6), dp(8), dp(6));
