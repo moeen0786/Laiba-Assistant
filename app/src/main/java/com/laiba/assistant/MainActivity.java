@@ -47,6 +47,10 @@ public class MainActivity extends Activity {
     private LinearLayout page;
     private int menuState = 0;
     private int setupPage = 0;
+    private LinearLayout chatMessages;
+    private ScrollView chatScroll;
+    private boolean chatSending = false;
+
 
 
     @Override public void onCreate(Bundle b) {
@@ -918,45 +922,16 @@ public class MainActivity extends Activity {
         page.addView(text("Good evening", 24, Color.WHITE, true));
         page.addView(text("How can I help you today?", 14, 0xffaab8df, false));
 
-        // Temporary welcome message: UI only, not saved as chat history.
-        gap(page, 12);
-        LinearLayout welcomeRow = row();
-        welcomeRow.setGravity(Gravity.TOP | Gravity.LEFT);
 
-        ImageView laibaIcon = new ImageView(this);
-        laibaIcon.setImageDrawable(
-            getPackageManager().getApplicationIcon(getApplicationInfo())
-        );
-        laibaIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        laibaIcon.setPadding(dp(5), dp(5), dp(5), dp(5));
-        laibaIcon.setBackground(
-            shape(0xff203b68, dp(18), dp(1), 0xff3279c8)
-        );
-        LinearLayout.LayoutParams iconParams =
-            new LinearLayout.LayoutParams(dp(38), dp(38));
-        iconParams.rightMargin = dp(8);
-        welcomeRow.addView(laibaIcon, iconParams);
+        chatScroll = new ScrollView(this);
+        chatScroll.setFillViewport(false);
+        chatMessages = column();
+        chatMessages.setGravity(Gravity.TOP);
+        chatMessages.setPadding(0, dp(8), 0, dp(12));
+        chatScroll.addView(chatMessages, new ScrollView.LayoutParams(-1, -2));
+        page.addView(chatScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        renderChatHistory();
 
-        TextView welcomeMessage = text(
-            "السلام علیکم! میں لائبہ ہوں۔\n" +
-            "آپ کی ذاتی AI اسسٹنٹ۔ بتائیے، آج میں آپ کی کیا مدد کر سکتی ہوں؟",
-            14, 0xffe7efff, false
-        );
-        welcomeMessage.setTextIsSelectable(true);
-        welcomeMessage.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
-        welcomeMessage.setPadding(dp(13), dp(11), dp(13), dp(11));
-        welcomeMessage.setBackground(
-            shape(0xff192640, dp(18), dp(1), 0xff30496c)
-        );
-        welcomeRow.addView(
-            welcomeMessage,
-            new LinearLayout.LayoutParams(0, -2, 1)
-        );
-
-        page.addView(welcomeRow,
-            new LinearLayout.LayoutParams(-1, -2));
-        gap(page, 16);
-        View spacer = new View(this); page.addView(spacer,new LinearLayout.LayoutParams(1,0,1));
         LinearLayout composer = row();
         composer.setPadding(dp(10), dp(6), dp(8), dp(6));
         composer.setBackground(shape(0xff171e38, dp(28), 1, 0xff354568));
@@ -1001,6 +976,14 @@ public class MainActivity extends Activity {
         composer.addView(actionSlot,
             new LinearLayout.LayoutParams(dp(44), dp(44)));
 
+
+        send.setOnClickListener(v -> {
+            String message = input.getText().toString().trim();
+            if (message.isEmpty() || chatSending) return;
+            input.setText("");
+            sendChatMessage(message);
+        });
+
         input.addTextChangedListener(new android.text.TextWatcher() {
             @Override public void beforeTextChanged(
                 CharSequence s, int start, int count, int after) {}
@@ -1018,6 +1001,79 @@ public class MainActivity extends Activity {
 
         page.addView(composer, new LinearLayout.LayoutParams(-1, -2));
         gap(page, 8);
+    }
+
+
+    private void renderChatHistory() {
+        if (chatMessages == null) return;
+        chatMessages.removeAllViews();
+        org.json.JSONArray items = LaibaChatEngine.history(this);
+        if (items.length() == 0) {
+            TextView welcome = text(
+                "السلام علیکم! میں لائبہ ہوں۔\nآپ کی ذاتی AI اسسٹنٹ۔ بتائیے، آج میں آپ کی کیا مدد کر سکتی ہوں؟",
+                14, 0xffe7efff, false);
+            welcome.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+            welcome.setPadding(dp(14), dp(12), dp(14), dp(12));
+            welcome.setBackground(shape(0xff192640, dp(18), dp(1), 0xff30496c));
+            chatMessages.addView(welcome, new LinearLayout.LayoutParams(-1, -2));
+        }
+        for (int i = 0; i < items.length(); i++) {
+            org.json.JSONObject item = items.optJSONObject(i);
+            if (item == null) continue;
+            addChatBubble(item.optString("text"),
+                "user".equals(item.optString("role")));
+        }
+        if (chatScroll != null) chatScroll.post(() ->
+            chatScroll.fullScroll(View.FOCUS_DOWN));
+    }
+
+    private void addChatBubble(String value, boolean user) {
+        TextView bubble = text(value, 14,
+            user ? Color.WHITE : 0xffe7efff, false);
+        bubble.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+        bubble.setTextIsSelectable(true);
+        bubble.setPadding(dp(14), dp(11), dp(14), dp(11));
+        bubble.setBackground(shape(user ? 0xff174b91 : 0xff192640,
+            dp(18), dp(1), user ? 0xff367fd0 : 0xff30496c));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            user ? (int)(getResources().getDisplayMetrics().widthPixels * .82f) : -1,
+            -2);
+        lp.gravity = user ? Gravity.RIGHT : Gravity.LEFT;
+        lp.bottomMargin = dp(10);
+        chatMessages.addView(bubble, lp);
+    }
+
+    private void sendChatMessage(String message) {
+        addChatBubble(message, true);
+        if (chatScroll != null) chatScroll.post(() ->
+            chatScroll.fullScroll(View.FOCUS_DOWN));
+        chatSending = true;
+        final String key;
+        try {
+            key = loadApiKeySecurely();
+            if (key == null || key.trim().isEmpty())
+                throw new Exception("Gemini API key is missing. Please reconnect it in Settings.");
+        } catch (Exception e) {
+            chatSending = false;
+            addChatBubble("Laiba: " + e.getMessage(), false);
+            return;
+        }
+        LaibaChatEngine.send(this, key, message, new LaibaChatEngine.Callback() {
+            @Override public void onReply(String reply) {
+                runOnUiThread(() -> {
+                    chatSending = false;
+                    addChatBubble(reply, false);
+                    if (chatScroll != null) chatScroll.post(() ->
+                        chatScroll.fullScroll(View.FOCUS_DOWN));
+                });
+            }
+            @Override public void onError(String error) {
+                runOnUiThread(() -> {
+                    chatSending = false;
+                    addChatBubble("پیغام بھیجنے میں مسئلہ ہوا: " + error, false);
+                });
+            }
+        });
     }
 
     private void addMenuItem(LinearLayout target, String symbol,
@@ -1047,7 +1103,10 @@ public class MainActivity extends Activity {
             new LinearLayout.LayoutParams(-1, -2);
         lp.bottomMargin = dp(13);
         target.addView(card, lp);
-        card.setOnClickListener(v -> showMenuPreview(title, description, symbol));
+        card.setOnClickListener(v -> {
+            if ("Chat History".equals(title)) showChatHistory();
+            else showMenuPreview(title, description, symbol);
+        });
     }
 
     private void showMenu() {
@@ -1100,6 +1159,40 @@ public class MainActivity extends Activity {
 
         gap(page, 8);
         page.addView(text("LAIBA  •  PERSONAL AI", 10, 0xff7187b8, true));
+    }
+
+
+    private void showChatHistory() {
+        menuState = 2;
+        base();
+        LinearLayout header = row();
+        TextView back = createBackButton();
+        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        back.setOnClickListener(v -> showMenu());
+        header.addView(text("CHAT HISTORY", 16, Color.WHITE, true));
+        page.addView(header);
+        gap(page, dp(12));
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout list = column();
+        list.setGravity(Gravity.TOP);
+        org.json.JSONArray items = LaibaChatEngine.history(this);
+        for (int i = 0; i < items.length(); i++) {
+            org.json.JSONObject item = items.optJSONObject(i);
+            if (item == null) continue;
+            TextView line = text(
+                ("user".equals(item.optString("role")) ? "You: " : "Laiba: ") +
+                item.optString("text"), 13, 0xffe7efff, false);
+            line.setGravity(Gravity.LEFT);
+            line.setPadding(dp(12), dp(10), dp(12), dp(10));
+            line.setBackground(shape(0xff192640, dp(14), 1, 0xff30496c));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.bottomMargin = dp(7);
+            list.addView(line, lp);
+        }
+        if (items.length() == 0)
+            list.addView(text("No saved messages yet.", 14, 0xffaab8df, false));
+        scroll.addView(list);
+        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
     }
 
     private void showMenuPreview(String title, String description, String symbol) {
