@@ -10,10 +10,6 @@ on:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 
-concurrency:
-  group: laiba-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: write
   pull-requests: write
@@ -92,13 +88,96 @@ jobs:
           name: Laiba-signed-release-apk
           path: app/build/outputs/apk/release/app-release.apk
 
+      - name: Record successful development build
+        if: github.event_name == 'pull_request' && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: laiba-success-${{ github.run_id }}
+          path: .github/workflows/android.yml
+          retention-days: 90
+          overwrite: true
+
+
   auto-merge:
     needs: build
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'laiba-self-development'
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'laiba-self-development' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 350
     steps:
-      - name: Merge after successful build
+      - name: Count successful APK records and merge at 15
         env:
           GH_TOKEN: ${{ secrets.LAIBA_GH_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: gh pr merge "$PR_NUMBER" --merge --repo "$GITHUB_REPOSITORY"
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          BASELINE="2026-11-26T00:53:00Z"
+
+          LAST_MERGED=$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --base main \
+            --head laiba-self-development \
+            --state merged \
+            --limit 100 \
+            --json mergedAt \
+            --jq '[.[].mergedAt] | map(select(. != null)) | max // empty')
+
+          if [ -z "$LAST_MERGED" ] || [[ "$LAST_MERGED" < "$BASELINE" ]]; then
+            LAST_MERGED="$BASELINE"
+          fi
+
+          echo "Counter starts after: $LAST_MERGED"
+
+          for attempt in $(seq 1 680); do
+
+            CURRENT_SHA=$(gh pr view "$PR_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json headRefOid --jq '.headRefOid')
+
+            if [ "$CURRENT_SHA" != "$EXPECTED_SHA" ]; then
+              echo "Newer untested commit detected. This run cannot merge."
+              exit 0
+            fi
+
+            SUCCESSFUL=$(gh api --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" |
+              jq --arg since "$LAST_MERGED" '
+                [
+                  .[].artifacts[]
+                  | select(.name | startswith("laiba-success-"))
+                  | select(.expired == false)
+                  | select(.workflow_run.head_branch == "laiba-self-development")
+                  | select(.created_at > $since)
+                ] | length
+              ')
+
+            echo "Successful APK builds: $SUCCESSFUL / 15"
+
+            if [ "$SUCCESSFUL" -ge 15 ]; then
+
+              CURRENT_SHA=$(gh pr view "$PR_NUMBER" \
+                --repo "$GITHUB_REPOSITORY" \
+                --json headRefOid --jq '.headRefOid')
+
+              if [ "$CURRENT_SHA" != "$EXPECTED_SHA" ]; then
+                echo "PR changed before merge. Merge blocked."
+                exit 0
+              fi
+
+              echo "15 successful builds confirmed. Merging verified commit."
+
+              gh api --method PUT \
+                "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/merge" \
+                -f merge_method=merge \
+                -f sha="$EXPECTED_SHA"
+
+              exit 0
+            fi
+
+            echo "Waiting for more successful builds..."
+            sleep 30
+          done
+
+          echo "Counter timed out. No automatic merge performed."
+          exit 1
