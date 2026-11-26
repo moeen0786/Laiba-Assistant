@@ -140,7 +140,6 @@ public class MainActivity extends Activity {
 
         back.setBackground(gradient);
         back.setElevation(dp(8));
-        back.setTranslationY(dp(15));
         return back;
     }
 
