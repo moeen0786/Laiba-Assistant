@@ -2,6 +2,9 @@ package com.laiba.assistant;
 
 import android.app.Activity;
 
+
+
+
 import android.animation.ValueAnimator;
 import android.graphics.Canvas;
 import android.graphics.Paint;
@@ -28,6 +31,8 @@ public class MainActivity extends Activity {
     private FrameLayout root;
     private LinearLayout page;
     private int menuState = 0;
+    private int setupPage = 0;
+
 
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
@@ -159,7 +164,7 @@ public class MainActivity extends Activity {
 
         gap(page, 20);
 
-        page.addView(text("Powered by Google Gemini",
+        page.addView(text("Powered by Gemini",
             15, 0xffdbe5ff, true));
 
         View bottomSpace = new View(this);
@@ -330,6 +335,7 @@ public class MainActivity extends Activity {
 
 
     private void showVerification() {
+        setupPage = 0;
         getWindow().getDecorView().setSystemUiVisibility(
             View.SYSTEM_UI_FLAG_FULLSCREEN |
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
@@ -360,7 +366,7 @@ public class MainActivity extends Activity {
 
         gap(page, 8);
         page.addView(text("Laiba", 38, Color.WHITE, true));
-        page.addView(text("Google Gemini", 19, 0xffb8d5ff, true));
+        page.addView(text("Gemini API", 19, 0xffb8d5ff, true));
         page.addView(text("Verification Required", 15, 0xffaab8df, false));
 
         gap(page, 12);
@@ -378,7 +384,7 @@ public class MainActivity extends Activity {
         card.addView(text("Welcome to Laiba", 21, Color.WHITE, true));
         gap(card, 6);
         card.addView(text(
-            "Continue by choosing your preferred sign-in option",
+            "Continue with your API key to set up Laiba",
             14, 0xffb8c7e9, false));
 
         gap(card, 12);
@@ -395,15 +401,6 @@ public class MainActivity extends Activity {
         }
 
         gap(card, 14);
-
-        TextView google = text(
-            "G     Sign in with Google", 16, Color.WHITE, true);
-        google.setPadding(dp(12), dp(15), dp(12), dp(15));
-        google.setBackground(shape(blue, dp(18), 1, 0xff67aaff));
-        card.addView(google,
-            new LinearLayout.LayoutParams(-1, -2));
-
-        gap(card, 10);
 
         TextView api = text(
             "Use API Key", 15, 0xffe5f2ff, true);
@@ -424,7 +421,80 @@ public class MainActivity extends Activity {
         page.addView(bottomSpace,
             new LinearLayout.LayoutParams(1, 0, 0.3f));
 
-        // UI-only preview. No login, API, or button actions are connected.
+        api.setOnClickListener(v -> showApiKeyPage());
+
+    }
+
+    private void authHeader(String title) {
+        LinearLayout header = row();
+        TextView back = text("‹", 34, cyan, true);
+        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        back.setOnClickListener(v -> showVerification());
+
+        LinearLayout labels = column();
+        labels.setGravity(Gravity.CENTER_VERTICAL);
+        labels.addView(text("LAIBA", 17, Color.WHITE, true));
+        labels.addView(text(title, 11, cyan, true));
+        header.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
+        header.addView(orb(19), new LinearLayout.LayoutParams(dp(42), dp(42)));
+        page.addView(header);
+    }
+
+    private void showApiKeyPage() {
+        setupPage = 2;
+        base();
+        authHeader("GEMINI API SETUP");
+
+        View spacer = new View(this);
+        page.addView(spacer, new LinearLayout.LayoutParams(1, 0, .2f));
+
+        page.addView(orb(35),
+            new LinearLayout.LayoutParams(dp(76), dp(76)));
+        gap(page, dp(18));
+        page.addView(text("Connect Gemini API",
+            23, Color.WHITE, true));
+        gap(page, dp(7));
+        page.addView(text("Enter your Gemini API key below.",
+            13, 0xffaab8df, false));
+
+        gap(page, dp(22));
+        LinearLayout card = column();
+        card.setPadding(dp(16), dp(20), dp(16), dp(20));
+        card.setBackground(shape(panel, dp(22), dp(1), 0xff315bce));
+
+        TextView label = text("Gemini API Key", 14, Color.WHITE, true);
+        label.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+        card.addView(label);
+        gap(card, dp(10));
+
+        EditText keyInput = new EditText(this);
+        keyInput.setSingleLine(true);
+        keyInput.setTextSize(14);
+        keyInput.setTextColor(Color.WHITE);
+        keyInput.setHintTextColor(0xff8296c2);
+        keyInput.setHint("Enter API key");
+        keyInput.setInputType( android.text.InputType.TYPE_CLASS_TEXT
+            | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        keyInput.setPadding(dp(14), dp(13), dp(14), dp(13));
+        keyInput.setBackground(shape(bg, dp(14), dp(1), 0xff42659d));
+        card.addView(keyInput, new LinearLayout.LayoutParams(-1, -2));
+        gap(card, dp(15));
+
+        TextView continueButton = pill("Continue", blue);
+        card.addView(continueButton,
+            new LinearLayout.LayoutParams(-1, -2));
+
+        gap(card, dp(9));
+        card.addView(text("The key is not saved or verified in this preview.",
+            11, 0xffaab8df, false));
+
+        page.addView(card, new LinearLayout.LayoutParams(-1, -2));
+        gap(page, dp(12));
+        page.addView(text("UI PREVIEW ONLY • API verification is inactive",
+            11, 0xff8296c2, false));
+
+        View bottom = new View(this);
+        page.addView(bottom, new LinearLayout.LayoutParams(1, 0, .2f));
     }
 
     private void showCallScreen() {
@@ -567,13 +637,30 @@ public class MainActivity extends Activity {
     }
     private void showChat() {
         menuState = 0;
+        setupPage = -1;
 
-        // Restore normal status bar after fullscreen splash.
-        getWindow().setStatusBarColor(bg);
-        getWindow().setNavigationBarColor(bg);
-        getWindow().getDecorView().setSystemUiVisibility(
-            View.SYSTEM_UI_FLAG_VISIBLE
-        );
+        // Edge-to-Edge: keep system bars visible and handle their insets.
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+            getWindow().setStatusBarColor(Color.TRANSPARENT);
+            getWindow().setNavigationBarColor(Color.TRANSPARENT);
+            getWindow().setStatusBarContrastEnforced(false);
+            getWindow().setNavigationBarContrastEnforced(false);
+
+            android.view.WindowInsetsController controller =
+                getWindow().getInsetsController();
+            if (controller != null) {
+                controller.show(android.view.WindowInsets.Type.systemBars());
+            }
+        } else {
+            getWindow().setStatusBarColor(bg);
+            getWindow().setNavigationBarColor(bg);
+            getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+            );
+        }
 
         base();
 
@@ -589,25 +676,41 @@ public class MainActivity extends Activity {
         );
         root.setBackground(premiumBg);
 
-        // Keep chat content below the Android status bar.
-        root.setOnApplyWindowInsetsListener((v, insets) -> {
-            int topInset = insets.getSystemWindowInsetTop();
-            page.setPadding(
-                dp(22), topInset + dp(18),
-                dp(22), dp(18)
-            );
-            return insets;
-        });
+        // Apply visible system-bar, display-cutout and keyboard insets.
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            root.setOnApplyWindowInsetsListener((v, insets) -> {
+                int bars = android.view.WindowInsets.Type.statusBars()
+                    | android.view.WindowInsets.Type.navigationBars()
+                    | android.view.WindowInsets.Type.displayCutout();
+
+                android.graphics.Insets safe = insets.getInsets(bars);
+                int imeBottom = insets.getInsets(
+                    android.view.WindowInsets.Type.ime()
+                ).bottom;
+
+                page.setPadding(
+                    dp(22), safe.top + dp(12),
+                    dp(22), Math.max(safe.bottom, imeBottom) + dp(12)
+                );
+                return insets;
+            });
+        } else {
+            root.setOnApplyWindowInsetsListener((v, insets) -> {
+                page.setPadding(
+                    dp(22), insets.getSystemWindowInsetTop() + dp(12),
+                    dp(22), insets.getSystemWindowInsetBottom() + dp(12)
+                );
+                return insets;
+            });
+        }
         root.requestApplyInsets();
 
         LinearLayout header = row();
-        header.setPadding(4,14,4,4);
+        header.setPadding(dp(4), dp(8), dp(4), dp(4));
 
         TextView menu = text("☰", 24, cyan, true);
         menu.setBackground(shape(0xff172b50, dp(21), dp(1), 0xff4b9cff));
         menu.setElevation(dp(5));
-        menu.setTranslationX(-dp(12));
-        menu.setTranslationY(-dp(5));
         header.addView(menu, new LinearLayout.LayoutParams(dp(46),dp(46)));
         menu.setOnClickListener(v -> showMenu());
 
@@ -646,6 +749,7 @@ public class MainActivity extends Activity {
             "آپ کی ذاتی AI اسسٹنٹ۔ بتائیے، آج میں آپ کی کیا مدد کر سکتی ہوں؟",
             14, 0xffe7efff, false
         );
+        welcomeMessage.setTextIsSelectable(true);
         welcomeMessage.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         welcomeMessage.setPadding(dp(13), dp(11), dp(13), dp(11));
         welcomeMessage.setBackground(
@@ -684,16 +788,40 @@ public class MainActivity extends Activity {
         TextView mic = text("🎙", 19, Color.WHITE, false);
         composer.addView(mic, new LinearLayout.LayoutParams(dp(40), dp(44)));
 
+        FrameLayout actionSlot = new FrameLayout(this);
+
         TextView call = text("☎", 18, Color.WHITE, true);
         call.setGravity(Gravity.CENTER);
         call.setBackground(shape(0xff142d68, dp(22), 1, 0xff315bce));
-        composer.addView(call, new LinearLayout.LayoutParams(dp(40), dp(40)));
         call.setOnClickListener(v -> showCallScreen());
 
         TextView send = text("↑", 24, Color.WHITE, true);
         send.setBackground(shape(0xff3185ff, dp(24), 0, 0));
         send.setElevation(dp(3));
-        composer.addView(send, new LinearLayout.LayoutParams(dp(44), dp(44)));
+
+        actionSlot.addView(call, new FrameLayout.LayoutParams(
+            dp(40), dp(40), Gravity.CENTER));
+        actionSlot.addView(send, new FrameLayout.LayoutParams(
+            dp(44), dp(44), Gravity.CENTER));
+
+        send.setVisibility(View.GONE);
+        composer.addView(actionSlot,
+            new LinearLayout.LayoutParams(dp(44), dp(44)));
+
+        input.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(
+                CharSequence s, int start, int count, int after) {}
+
+            @Override public void onTextChanged(
+                CharSequence s, int start, int before, int count) {
+                boolean hasText = s != null && s.toString().trim().length() > 0;
+                call.setVisibility(hasText ? View.GONE : View.VISIBLE);
+                send.setVisibility(hasText ? View.VISIBLE : View.GONE);
+            }
+
+            @Override public void afterTextChanged(
+                android.text.Editable s) {}
+        });
 
         page.addView(composer, new LinearLayout.LayoutParams(-1, -2));
         gap(page, 8);
@@ -816,8 +944,16 @@ public class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
-        if (menuState == 2) showMenu();
-        else if (menuState == 1) showChat();
-        else showChat();
+        if (menuState == 2) {
+            showMenu();
+        } else if (menuState == 1) {
+            showChat();
+        } else if (setupPage == 1 || setupPage == 2) {
+            showVerification();
+        } else if (setupPage == 0) {
+            // Stay on verification; never bypass it with Back.
+        } else {
+            super.onBackPressed();
+        }
     }
 }
