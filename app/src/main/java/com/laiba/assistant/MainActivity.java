@@ -1,22 +1,9 @@
 package com.laiba.assistant;
 
 import android.app.Activity;
-import android.os.CancellationSignal;
-import android.os.Handler;
-import android.os.Looper;
 
-import androidx.credentials.Credential;
-import androidx.credentials.CredentialManager;
-import androidx.credentials.CredentialManagerCallback;
-import androidx.credentials.CustomCredential;
-import androidx.credentials.GetCredentialRequest;
-import androidx.credentials.GetCredentialResponse;
-import androidx.credentials.exceptions.GetCredentialException;
 
-import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption;
-import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
 
-import java.util.concurrent.Executor;
 
 import android.animation.ValueAnimator;
 import android.graphics.Canvas;
@@ -46,12 +33,6 @@ public class MainActivity extends Activity {
     private int menuState = 0;
     private int setupPage = 0;
 
-    private static final String WEB_CLIENT_ID =
-        "872193316354-fjssar2vf37gl00qlfrtbjdedou5914q.apps.googleusercontent.com";
-    private String googleIdToken;
-    private String googleAccountEmail;
-    private String googleAccountName;
-    private boolean googleSignInInProgress;
 
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
@@ -183,7 +164,7 @@ public class MainActivity extends Activity {
 
         gap(page, 20);
 
-        page.addView(text("Powered by Google Gemini",
+        page.addView(text("Powered by Gemini",
             15, 0xffdbe5ff, true));
 
         View bottomSpace = new View(this);
@@ -385,7 +366,7 @@ public class MainActivity extends Activity {
 
         gap(page, 8);
         page.addView(text("Laiba", 38, Color.WHITE, true));
-        page.addView(text("Google Gemini", 19, 0xffb8d5ff, true));
+        page.addView(text("Gemini API", 19, 0xffb8d5ff, true));
         page.addView(text("Verification Required", 15, 0xffaab8df, false));
 
         gap(page, 12);
@@ -403,7 +384,7 @@ public class MainActivity extends Activity {
         card.addView(text("Welcome to Laiba", 21, Color.WHITE, true));
         gap(card, 6);
         card.addView(text(
-            "Continue by choosing your preferred sign-in option",
+            "Continue with your API key to set up Laiba",
             14, 0xffb8c7e9, false));
 
         gap(card, 12);
@@ -420,15 +401,6 @@ public class MainActivity extends Activity {
         }
 
         gap(card, 14);
-
-        TextView google = text(
-            "G     Sign in with Google", 16, Color.WHITE, true);
-        google.setPadding(dp(12), dp(15), dp(12), dp(15));
-        google.setBackground(shape(blue, dp(18), 1, 0xff67aaff));
-        card.addView(google,
-            new LinearLayout.LayoutParams(-1, -2));
-
-        gap(card, 10);
 
         TextView api = text(
             "Use API Key", 15, 0xffe5f2ff, true);
@@ -449,10 +421,8 @@ public class MainActivity extends Activity {
         page.addView(bottomSpace,
             new LinearLayout.LayoutParams(1, 0, 0.3f));
 
-        google.setOnClickListener(v -> showGoogleAccountPage());
         api.setOnClickListener(v -> showApiKeyPage());
 
-        // Google login and API verification remain inactive.
     }
 
     private void authHeader(String title) {
@@ -468,162 +438,6 @@ public class MainActivity extends Activity {
         header.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
         header.addView(orb(19), new LinearLayout.LayoutParams(dp(42), dp(42)));
         page.addView(header);
-    }
-
-    private void startGoogleSignIn(
-            TextView status, TextView choose, TextView add) {
-        if (googleSignInInProgress) return;
-
-        googleSignInInProgress = true;
-        status.setText("Opening secure Google sign-in...");
-        choose.setEnabled(false);
-        add.setEnabled(false);
-
-        try {
-            GetSignInWithGoogleOption option =
-                new GetSignInWithGoogleOption.Builder(WEB_CLIENT_ID).build();
-
-            GetCredentialRequest request =
-                new GetCredentialRequest.Builder()
-                    .addCredentialOption(option)
-                    .build();
-
-            Executor mainExecutor =
-                command -> new Handler(Looper.getMainLooper()).post(command);
-
-            CredentialManager manager = CredentialManager.create(this);
-
-            manager.getCredentialAsync(
-                this,
-                request,
-                new CancellationSignal(),
-                mainExecutor,
-                new CredentialManagerCallback<GetCredentialResponse,
-                        GetCredentialException>() {
-                    @Override
-                    public void onResult(GetCredentialResponse result) {
-                        googleSignInInProgress = false;
-                        choose.setEnabled(true);
-                        add.setEnabled(true);
-
-                        Credential credential = result.getCredential();
-                        if (!(credential instanceof CustomCredential)) {
-                            status.setText("Google returned an unsupported credential.");
-                            return;
-                        }
-
-                        CustomCredential custom = (CustomCredential) credential;
-                        if (!GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
-                                .equals(custom.getType())) {
-                            status.setText("Google ID Token was not returned.");
-                            return;
-                        }
-
-                        GoogleIdTokenCredential google =
-                                GoogleIdTokenCredential.createFrom(custom.getData());
-
-                            googleIdToken = google.getIdToken();
-                            googleAccountEmail = google.getId();
-                            googleAccountName = google.getDisplayName();
-
-                            if (googleIdToken == null || googleIdToken.isEmpty()) {
-                                status.setText("Google sign-in completed, but ID Token is empty.");
-                                return;
-                            }
-
-                            String account = (googleAccountName == null
-                                    || googleAccountName.trim().isEmpty())
-                                ? googleAccountEmail
-                                : googleAccountName + "\n" + googleAccountEmail;
-
-                            status.setText(
-                                "Google sign-in successful\n" + account
-                                + "\nID Token received in app memory."
-                                + "\nServer verification is not connected yet."
-                            );
-                            choose.setText("Choose another account");
-                    }
-
-                    @Override
-                    public void onError(GetCredentialException error) {
-                        googleSignInInProgress = false;
-                        choose.setEnabled(true);
-                        add.setEnabled(true);
-                        status.setText(
-                            "Google sign-in cancelled or failed. Tap a button to try again."
-                        );
-                    }
-                }
-            );
-        } catch (Exception e) {
-            googleSignInInProgress = false;
-            choose.setEnabled(true);
-            add.setEnabled(true);
-            status.setText("Could not start Google sign-in. Please try again.");
-        }
-    }
-
-    private void showGoogleAccountPage() {
-        setupPage = 1;
-        base();
-        authHeader("GOOGLE ACCOUNT");
-
-        View spacer = new View(this);
-        page.addView(spacer, new LinearLayout.LayoutParams(1, 0, .18f));
-
-        page.addView(orb(38),
-            new LinearLayout.LayoutParams(dp(82), dp(82)));
-        gap(page, dp(18));
-        page.addView(text("Choose your Google Account",
-            23, Color.WHITE, true));
-        gap(page, dp(7));
-        page.addView(text("Select an account to connect with Laiba.",
-            13, 0xffaab8df, false));
-
-        gap(page, dp(22));
-        LinearLayout card = column();
-        card.setGravity(Gravity.CENTER);
-        card.setPadding(dp(16), dp(20), dp(16), dp(20));
-        card.setBackground(shape(panel, dp(22), dp(1), 0xff315bce));
-
-        TextView accountIcon = text("G", 28, Color.WHITE, true);
-        accountIcon.setBackground(shape(0xff263d70, dp(30), dp(1), 0xff4b9cff));
-        card.addView(accountIcon,
-            new LinearLayout.LayoutParams(dp(58), dp(58)));
-        gap(card, dp(12));
-        card.addView(text("Google secure account selection",
-            17, Color.WHITE, true));
-        gap(card, dp(6));
-        card.addView(text(
-            "Android will display the available Google accounts securely.",
-            12, 0xffaab8df, false));
-        gap(card, dp(15));
-
-        TextView choose = pill("Choose an account", blue);
-        card.addView(choose, new LinearLayout.LayoutParams(-1, -2));
-        gap(card, dp(9));
-
-        TextView add = text("+   Add another Google account",
-            14, 0xffdce7ff, true);
-        add.setPadding(dp(10), dp(13), dp(10), dp(13));
-        add.setBackground(shape(bg, dp(16), dp(1), cyan));
-        card.addView(add, new LinearLayout.LayoutParams(-1, -2));
-
-        page.addView(card, new LinearLayout.LayoutParams(-1, -2));
-
-        gap(page, dp(12));
-        TextView status = text(
-            "Google sign-in is ready. Choose an account to continue.",
-            12, 0xffaab8df, false);
-        page.addView(status, new LinearLayout.LayoutParams(-1, -2));
-
-        View bottom = new View(this);
-        page.addView(bottom, new LinearLayout.LayoutParams(1, 0, .2f));
-
-        choose.setOnClickListener(
-            v -> startGoogleSignIn(status, choose, add));
-        add.setOnClickListener(
-            v -> startGoogleSignIn(status, choose, add));
     }
 
     private void showApiKeyPage() {
