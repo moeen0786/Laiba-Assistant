@@ -434,7 +434,7 @@ public class MainActivity extends Activity {
 
     private void authHeader(String title) {
         LinearLayout header = row();
-        TextView back = text("‹", 34, cyan, true);
+        TextView back = text("←", 30, cyan, true);
         header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
         back.setOnClickListener(v -> showVerification());
 
@@ -868,7 +868,7 @@ public class MainActivity extends Activity {
         base();
 
         LinearLayout header = row();
-        TextView back = text("‹", 34, cyan, true);
+        TextView back = text("←", 30, cyan, true);
         header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
         back.setOnClickListener(v -> showChat());
 
@@ -920,7 +920,7 @@ public class MainActivity extends Activity {
         base();
 
         LinearLayout header = row();
-        TextView back = text("‹", 34, cyan, true);
+        TextView back = text("←", 30, cyan, true);
         header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
         back.setOnClickListener(v -> showMenu());
         header.addView(text("COMMAND CENTER", 14, Color.WHITE, true));
@@ -941,17 +941,20 @@ public class MainActivity extends Activity {
         page.addView(text("This section is a UI preview.", 12, 0xff7187b8, false));
         gap(page, 25);
 
-        TextView backButton = pill("‹   Back to Command Center", 0xff174b91);
-        page.addView(backButton);
-        backButton.setOnClickListener(v -> showMenu());
 
         View bottom = new View(this);
         page.addView(bottom, new LinearLayout.LayoutParams(1, 0, 0.45f));
     }
 
     @Override public void onBackPressed() {
-        if (menuState == 2) showMenu();
-        else if (menuState == 1) showChat();
-        else showChat();
+        if (menuState == 2) {
+            showMenu();
+        } else if (menuState == 1) {
+            showChat();
+        } else if (setupPage == 1 || setupPage == 2) {
+            showVerification();
+        } else {
+            showChat();
+        }
     }
 }
