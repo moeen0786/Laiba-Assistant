@@ -867,16 +867,40 @@ public class MainActivity extends Activity {
         TextView mic = text("🎙", 19, Color.WHITE, false);
         composer.addView(mic, new LinearLayout.LayoutParams(dp(40), dp(44)));
 
+        FrameLayout actionSlot = new FrameLayout(this);
+
         TextView call = text("☎", 18, Color.WHITE, true);
         call.setGravity(Gravity.CENTER);
         call.setBackground(shape(0xff142d68, dp(22), 1, 0xff315bce));
-        composer.addView(call, new LinearLayout.LayoutParams(dp(40), dp(40)));
         call.setOnClickListener(v -> showCallScreen());
 
         TextView send = text("↑", 24, Color.WHITE, true);
         send.setBackground(shape(0xff3185ff, dp(24), 0, 0));
         send.setElevation(dp(3));
-        composer.addView(send, new LinearLayout.LayoutParams(dp(44), dp(44)));
+
+        actionSlot.addView(call, new FrameLayout.LayoutParams(
+            dp(40), dp(40), Gravity.CENTER));
+        actionSlot.addView(send, new FrameLayout.LayoutParams(
+            dp(44), dp(44), Gravity.CENTER));
+
+        send.setVisibility(View.GONE);
+        composer.addView(actionSlot,
+            new LinearLayout.LayoutParams(dp(44), dp(44)));
+
+        input.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(
+                CharSequence s, int start, int count, int after) {}
+
+            @Override public void onTextChanged(
+                CharSequence s, int start, int before, int count) {
+                boolean hasText = s != null && s.toString().trim().length() > 0;
+                call.setVisibility(hasText ? View.GONE : View.VISIBLE);
+                send.setVisibility(hasText ? View.VISIBLE : View.GONE);
+            }
+
+            @Override public void afterTextChanged(
+                android.text.Editable s) {}
+        });
 
         page.addView(composer, new LinearLayout.LayoutParams(-1, -2));
         gap(page, 8);
