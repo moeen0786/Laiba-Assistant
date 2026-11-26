@@ -85,6 +85,29 @@ public class MainActivity extends Activity {
         page = column(); page.setPadding(22, 18, 22, 18);
         root.addView(page, new FrameLayout.LayoutParams(-1, -1));
         setContentView(root);
+
+        // Keep screens clear of the Android status and navigation bars.
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            int topInset;
+            int bottomInset;
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                int bars = android.view.WindowInsets.Type.statusBars()
+                    | android.view.WindowInsets.Type.navigationBars()
+                    | android.view.WindowInsets.Type.displayCutout();
+                android.graphics.Insets safe = insets.getInsets(bars);
+                topInset = safe.top;
+                bottomInset = safe.bottom;
+            } else {
+                topInset = insets.getSystemWindowInsetTop();
+                bottomInset = insets.getSystemWindowInsetBottom();
+            }
+            page.setPadding(
+                dp(22), topInset + dp(18),
+                dp(22), bottomInset + dp(18)
+            );
+            return insets;
+        });
+        root.requestApplyInsets();
     }
     private void gap(LinearLayout l, int h) {
         View v = new View(this); l.addView(v, new LinearLayout.LayoutParams(1, h));
