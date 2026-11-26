@@ -479,8 +479,8 @@ public class MainActivity extends Activity {
             17, Color.WHITE, true));
         gap(card, dp(6));
         card.addView(text(
-            "Your phone's Google accounts will appear here
-when secure account selection is connected.",
+            "Your phone's Google accounts will appear here\\n" +
+            "when secure account selection is connected.",
             12, 0xffaab8df, false));
         gap(card, dp(15));
 
