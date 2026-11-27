@@ -54,6 +54,8 @@ public final class GeminiLiveCallClient {
     private AudioTrack player;
     private Thread microphoneThread;
     private AudioFocusRequest focusRequest;
+    private AudioManager audioManager;
+    private boolean audioFocusGranted = false;
 
     public GeminiLiveCallClient(Callback callback) {
         this.callback = callback;
@@ -281,17 +283,72 @@ public final class GeminiLiveCallClient {
                 .setBufferSizeInBytes(Math.max(outputBuffer * 2, 8192))
                 .build();
 
-            AudioManager manager =
-                (AudioManager) recorderContext.getSystemService(
+            if (recorderContext == null) {
+                throw new IllegalStateException("Audio context unavailable.");
+            }
+
+            audioManager = (AudioManager)
+                recorderContext.getSystemService(
                     android.content.Context.AUDIO_SERVICE);
 
-            if (manager != null) {
-                manager.setMode(AudioManager.MODE_IN_COMMUNICATION);
-                manager.setSpeakerphoneOn(true);
+            if (audioManager == null) {
+                throw new IllegalStateException("Audio manager unavailable.");
             }
+
+            audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                AudioAttributes focusAttributes =
+                    new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build();
+
+                focusRequest = new AudioFocusRequest.Builder(
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                    .setAudioAttributes(focusAttributes)
+                    .setAcceptsDelayedFocusGain(false)
+                    .setOnAudioFocusChangeListener(change -> {
+                        if (change == AudioManager.AUDIOFOCUS_LOSS) {
+                            close();
+                        } else if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                            stopPlayback();
+                        }
+                    })
+                    .build();
+
+                audioFocusGranted =
+                    audioManager.requestAudioFocus(focusRequest) ==
+                    AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+            } else {
+                audioFocusGranted =
+                    audioManager.requestAudioFocus(
+                        change -> {
+                            if (change == AudioManager.AUDIOFOCUS_LOSS) {
+                                close();
+                            } else if (change ==
+                                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                                stopPlayback();
+                            }
+                        },
+                        AudioManager.STREAM_VOICE_CALL,
+                        AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
+                    ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+            }
+
+            if (!audioFocusGranted) {
+                throw new IllegalStateException("Audio focus unavailable.");
+            }
+
+            audioManager.setSpeakerphoneOn(true);
 
             player.play();
             recorder.startRecording();
+
+            if (recorder.getRecordingState() !=
+                    AudioRecord.RECORDSTATE_RECORDING) {
+                throw new IllegalStateException("Microphone did not start.");
+            }
             startPlaybackWorker();
 
             microphoneThread = new Thread(() -> {
@@ -432,14 +489,22 @@ public final class GeminiLiveCallClient {
             player = null;
         }
 
-        if (recorderContext != null) {
-            AudioManager manager = (AudioManager)
-                recorderContext.getSystemService(
-                    android.content.Context.AUDIO_SERVICE);
-            if (manager != null) {
-                manager.setSpeakerphoneOn(false);
-                manager.setMode(AudioManager.MODE_NORMAL);
-            }
+        if (audioManager != null) {
+            try {
+                audioManager.setSpeakerphoneOn(false);
+                audioManager.setMode(AudioManager.MODE_NORMAL);
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                        focusRequest != null) {
+                    audioManager.abandonAudioFocusRequest(focusRequest);
+                } else {
+                    audioManager.abandonAudioFocus(null);
+                }
+            } catch (Exception ignored) {}
+
+            audioFocusGranted = false;
+            focusRequest = null;
+            audioManager = null;
         }
 
         callback.onStatus("Call ended.");
