@@ -317,6 +317,28 @@ public class LaibaChatEngine {
 
                 JSONObject generationConfig = new JSONObject();
                 generationConfig.put("responseMimeType", "application/json");
+
+                JSONObject responseSchema = new JSONObject();
+                responseSchema.put("type", "OBJECT");
+
+                JSONObject properties = new JSONObject();
+                properties.put("reply",
+                        new JSONObject().put("type", "STRING"));
+
+                JSONObject memorySchema = new JSONObject();
+                memorySchema.put("type", "ARRAY");
+                memorySchema.put("items",
+                        new JSONObject().put("type", "STRING"));
+                properties.put("memories", memorySchema);
+
+                responseSchema.put("properties", properties);
+
+                JSONArray required = new JSONArray();
+                required.put("reply");
+                required.put("memories");
+                responseSchema.put("required", required);
+
+                generationConfig.put("responseSchema", responseSchema);
                 generationConfig.put("maxOutputTokens", 1024);
 
                 JSONObject thinkingConfig = new JSONObject();
