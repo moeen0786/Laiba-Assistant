@@ -86,7 +86,7 @@ public final class ApiRateLimitHandler {
 
         if (!retryable) {
             return new Policy(false, false, 0,
-                    "Gemini API request failed (HTTP " + status + ").");
+                    detailedProviderError(status, body));
         }
 
         long serverDelay = parseRetryAfter(retryAfter);
