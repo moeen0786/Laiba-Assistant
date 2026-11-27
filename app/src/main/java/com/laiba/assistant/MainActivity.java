@@ -1277,18 +1277,11 @@ public class MainActivity extends Activity {
 
         showChatLoadingIndicator();
 
-        // A local-memory answer must work even without an API key.
-        // An empty key is rejected by the engine only if Gemini is needed.
-        String loadedKey = "";
-        try {
-            loadedKey = loadApiKeySecurely();
-        } catch (Exception ignored) {
-        }
-
-        final String key = loadedKey == null ? "" : loadedKey.trim();
-
-        activeChatRequest = LaibaChatEngine.send(
-            this, key, message, new LaibaChatEngine.Callback() {
+        // Local recall runs first in the background.
+        // The API key is loaded only if Gemini fallback is needed.
+        activeChatRequest = LaibaChatEngine.sendWithApiKeyProvider(
+            this, () -> loadApiKeySecurely(), message,
+            new LaibaChatEngine.Callback() {
 
             @Override public void onStream(String partialReply) {
                 runOnUiThread(() -> {

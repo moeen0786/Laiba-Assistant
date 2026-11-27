@@ -22,7 +22,7 @@ public class LaibaChatEngine {
     private static final String PREFS = "laiba_chat_memory_v1";
     private static final String HISTORY_KEY = "history";
     private static final String MEMORY_KEY = "memory";
-    private static final int HISTORY_LIMIT = 200;
+    private static final int HISTORY_LIMIT = 500;
     private static final int MEMORY_LIMIT = 300;
 
     public interface Callback {
@@ -30,6 +30,10 @@ public class LaibaChatEngine {
         void onReply(String reply);
         void onError(String error);
         void onCancelled();
+    }
+
+    public interface ApiKeyProvider {
+        String load() throws Exception;
     }
 
     public static final class Request {
@@ -254,6 +258,15 @@ public class LaibaChatEngine {
 
     public static Request send(
             Context context, String apiKey, String message, Callback callback) {
+        return sendWithApiKeyProvider(
+                context, () -> apiKey, message, callback);
+    }
+
+    public static Request sendWithApiKeyProvider(
+            Context context,
+            ApiKeyProvider apiKeyProvider,
+            String message,
+            Callback callback) {
 
         final Context app = context.getApplicationContext();
         final String cleanMessage = message == null ? "" : message.trim();
@@ -266,29 +279,6 @@ public class LaibaChatEngine {
             return request;
         }
 
-        String explicitFact = explicitMemoryText(app, cleanMessage);
-        if (explicitFact != null) {
-            saveMemory(app, explicitFact);
-            handler.post(() -> callback.onReply(
-                    "ٹھیک ہے، میں نے یہ بات اپنی الگ Memory میں محفوظ کر لی ہے۔"));
-            return request;
-        }
-
-        // Search local history and saved memory before contacting Gemini.
-        // A local answer does not require internet or an API key.
-        String localAnswer = LocalMemorySystem.findAnswer(app, cleanMessage);
-
-        if (localAnswer != null) {
-            addMessage(app, "user", cleanMessage);
-            addMessage(app, "model", localAnswer);
-
-            final String answer = localAnswer;
-            handler.post(() -> callback.onReply(answer));
-            return request;
-        }
-
-        addMessage(app, "user", cleanMessage);
-
         Thread worker = new Thread(() -> {
             String finalReply = null;
             JSONObject[] usageMetadata = new JSONObject[1];
@@ -297,6 +287,68 @@ public class LaibaChatEngine {
             boolean usageRecorded = false;
 
             try {
+                if (request.isCancelled()) {
+                    handler.post(callback::onCancelled);
+                    return;
+                }
+
+                // Save-memory commands are also processed off the UI thread.
+                String explicitFact = explicitMemoryText(app, cleanMessage);
+                if (explicitFact != null) {
+                    if (!request.markCompleted()) {
+                        handler.post(callback::onCancelled);
+                        return;
+                    }
+
+                    saveMemory(app, explicitFact);
+                    handler.post(() -> callback.onReply(
+                            "ٹھیک ہے، میں نے یہ بات اپنی الگ Memory میں محفوظ کر لی ہے۔"));
+                    return;
+                }
+
+                // Search up to 500 chat messages and 300 saved memory facts.
+                // This scan runs on this worker, never on Android's UI thread.
+                long localSearchStarted =
+                        android.os.SystemClock.elapsedRealtime();
+
+                String localAnswer =
+                        LocalMemorySystem.findAnswer(app, cleanMessage);
+
+                long localSearchMillis =
+                        android.os.SystemClock.elapsedRealtime()
+                                - localSearchStarted;
+
+                android.util.Log.i(
+                        "LaibaLocalMemory",
+                        "scan_ms=" + localSearchMillis
+                                + " history_limit=500 memory_limit=300");
+
+                if (request.isCancelled()) {
+                    handler.post(callback::onCancelled);
+                    return;
+                }
+
+                if (localAnswer != null) {
+                    if (!request.markCompleted()) {
+                        handler.post(callback::onCancelled);
+                        return;
+                    }
+
+                    addMessage(app, "user", cleanMessage);
+                    addMessage(app, "model", localAnswer);
+
+                    final String answer = localAnswer;
+                    handler.post(() -> callback.onReply(answer));
+                    return;
+                }
+
+                // No strong local match: save the new question, then use Gemini.
+                addMessage(app, "user", cleanMessage);
+
+                // Do not decrypt/load the API key unless Gemini is required.
+                String apiKey = apiKeyProvider == null
+                        ? null : apiKeyProvider.load();
+
                 if (apiKey == null || apiKey.trim().isEmpty()) {
                     throw new Exception(
                             "Gemini API key is missing. Please add it in Settings.");

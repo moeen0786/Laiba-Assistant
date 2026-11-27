@@ -14,9 +14,9 @@ import java.util.Set;
 
 public final class LocalMemorySystem {
 
-    private static final int HISTORY_LIMIT = 200;
+    private static final int HISTORY_LIMIT = 500;
     private static final int MEMORY_LIMIT = 300;
-    private static final double MIN_SCORE = 0.55;
+    private static final double MIN_SCORE = 0.68;
 
     private LocalMemorySystem() {}
 
@@ -36,7 +36,7 @@ public final class LocalMemorySystem {
         if (context == null || question == null) return null;
 
         String query = question.trim();
-        if (query.isEmpty() || !isRecallIntent(query)) return null;
+        if (query.isEmpty()) return null;
 
         Set<String> queryTerms = terms(query);
         if (queryTerms.isEmpty()) return null;
