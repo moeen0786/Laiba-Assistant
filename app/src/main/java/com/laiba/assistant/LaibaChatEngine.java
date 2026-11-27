@@ -240,6 +240,7 @@ public class LaibaChatEngine {
         Thread worker = new Thread(() -> {
             String finalReply = null;
             JSONObject[] usageMetadata = new JSONObject[1];
+            JSONObject[] attemptUsageMetadata = new JSONObject[1];
             int attempts = 0;
             boolean usageRecorded = false;
 
@@ -303,24 +304,44 @@ public class LaibaChatEngine {
                         handler.post(callback::onCancelled);
                         return;
                     }
+                    throw new Exception(
+                            "Cooldown wait interrupted. Please try again.");
                 }
 
                 for (int attempt = 0; attempt < 4; attempt++) {
                     if (request.isCancelled()) break;
 
                     raw.setLength(0);
-                    usageMetadata[0] = null;
+                    attemptUsageMetadata[0] = null;
                     attempts = attempt + 1;
 
                     try {
                         streamAttempt(
                                 endpoint, apiKey.trim(), body, request, raw,
-                                handler, callback, usageMetadata);
+                                handler, callback, attemptUsageMetadata);
 
+                        if (request.isCancelled()) break;
+
+                        String attemptText = raw.toString().trim();
+                        if (attemptText.isEmpty()) {
+                            throw new IOException(
+                                    "Gemini stream ended without a complete response.");
+                        }
+
+                        JSONObject attemptResult = new JSONObject(attemptText);
+                        if (attemptResult.optString("reply", "").trim().isEmpty()) {
+                            throw new IOException(
+                                    "Gemini returned an incomplete reply.");
+                        }
+
+                        usageMetadata[0] = mergeUsageMetadata(
+                                usageMetadata[0], attemptUsageMetadata[0]);
                         lastError = null;
                         break;
 
                     } catch (Exception failure) {
+                        usageMetadata[0] = mergeUsageMetadata(
+                                usageMetadata[0], attemptUsageMetadata[0]);
                         if (request.isCancelled()) break;
                         lastError = failure;
 
@@ -333,7 +354,8 @@ public class LaibaChatEngine {
                                     ApiRateLimitHandler.evaluate(
                                             app, http.status,
                                             http.responseBody,
-                                            http.retryAfter);
+                                            http.retryAfter,
+                                            attempt);
 
                             if (!policy.retryable || attempt >= 3) {
                                 lastError = new Exception(policy.message);
@@ -585,6 +607,38 @@ public class LaibaChatEngine {
             this.status = status;
             this.responseBody = responseBody;
             this.retryAfter = retryAfter;
+        }
+    }
+
+    private static JSONObject mergeUsageMetadata(
+            JSONObject total, JSONObject attempt) {
+
+        if (attempt == null) return total;
+
+        try {
+            JSONObject merged = total == null
+                    ? new JSONObject()
+                    : new JSONObject(total.toString());
+
+            String[] fields = {
+                    "promptTokenCount",
+                    "candidatesTokenCount",
+                    "totalTokenCount",
+                    "cachedContentTokenCount",
+                    "thoughtsTokenCount"
+            };
+
+            for (String field : fields) {
+                if (attempt.has(field)) {
+                    long previous = merged.optLong(field, 0);
+                    long current = attempt.optLong(field, 0);
+                    merged.put(field, previous + current);
+                }
+            }
+
+            return merged;
+        } catch (Exception ignored) {
+            return total == null ? attempt : total;
         }
     }
 

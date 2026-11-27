@@ -31,19 +31,19 @@ public final class InternetConnectionManager {
 
             @Override
             public void onLost(Network network) {
-                publish(false);
+                publish(hasValidatedInternet(context));
             }
 
             @Override
             public void onCapabilitiesChanged(
                     Network network,
                     NetworkCapabilities capabilities) {
-                publish(isValidated(capabilities));
+                publish(hasValidatedInternet(context));
             }
 
             @Override
             public void onUnavailable() {
-                publish(false);
+                publish(hasValidatedInternet(context));
             }
         };
 

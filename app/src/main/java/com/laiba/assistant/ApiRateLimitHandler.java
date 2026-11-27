@@ -45,6 +45,12 @@ public final class ApiRateLimitHandler {
     public static Policy evaluate(
             Context context, int status,
             String responseBody, String retryAfter) {
+        return evaluate(context, status, responseBody, retryAfter, 0);
+    }
+
+    public static Policy evaluate(
+            Context context, int status,
+            String responseBody, String retryAfter, int attempt) {
 
         String body = responseBody == null ? "" : responseBody;
         String lower = body.toLowerCase(Locale.ROOT);
@@ -88,7 +94,7 @@ public final class ApiRateLimitHandler {
 
         long delay = serverDelay > 0
                 ? serverDelay
-                : backoffDelay(0);
+                : backoffDelay(attempt);
 
         delay = Math.max(1000L, delay);
 
@@ -108,7 +114,7 @@ public final class ApiRateLimitHandler {
         long jitter = ThreadLocalRandom.current()
                 .nextLong(0, Math.max(1L, exponential / 4L));
 
-        return exponential + jitter;
+        return Math.min(MAX_BACKOFF, exponential + jitter);
     }
 
     public static long remainingCooldown(Context context) {
