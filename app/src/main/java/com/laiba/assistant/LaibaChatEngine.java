@@ -36,20 +36,27 @@ public class LaibaChatEngine {
         private final AtomicBoolean cancelled = new AtomicBoolean(false);
         private volatile HttpURLConnection connection;
         private volatile Thread worker;
+        private boolean completed;
 
         public void cancel() {
-            if (!cancelled.compareAndSet(false, true)) return;
-
             HttpURLConnection active;
+            Thread running;
+
             synchronized (this) {
+                if (completed || !cancelled.compareAndSet(false, true)) return;
                 active = connection;
                 connection = null;
+                running = worker;
             }
 
             if (active != null) active.disconnect();
-
-            Thread running = worker;
             if (running != null) running.interrupt();
+        }
+
+        public synchronized boolean markCompleted() {
+            if (cancelled.get()) return false;
+            completed = true;
+            return true;
         }
 
         private synchronized boolean attachConnection(
@@ -445,17 +452,17 @@ public class LaibaChatEngine {
                     throw new Exception("Gemini returned an empty reply.");
                 }
 
+                if (!request.markCompleted()) {
+                    removeLastMessage(app, "user", cleanMessage);
+                    handler.post(callback::onCancelled);
+                    return;
+                }
+
                 JSONArray newMemories = result.optJSONArray("memories");
                 if (newMemories != null) {
                     for (int i = 0; i < newMemories.length(); i++) {
                         saveMemory(app, newMemories.optString(i));
                     }
-                }
-
-                if (request.isCancelled()) {
-                    removeLastMessage(app, "user", cleanMessage);
-                    handler.post(callback::onCancelled);
-                    return;
                 }
 
                 if (!usageRecorded) {
