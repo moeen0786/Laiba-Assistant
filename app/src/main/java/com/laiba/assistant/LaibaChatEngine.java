@@ -459,7 +459,7 @@ public class LaibaChatEngine {
                 // Send the current question immediately.
                 // No pre-request cooldown wait or automatic retry.
 
-                for (int attempt = 0; attempt < 1; attempt++) {
+                for (int attempt = 0; attempt < 5; attempt++) {
                     if (request.isCancelled()) break;
 
                     raw.setLength(0);
@@ -508,7 +508,7 @@ public class LaibaChatEngine {
                                             http.retryAfter,
                                             attempt);
 
-                            if (!policy.retryable || attempt >= 0) {
+                            if (!policy.retryable || attempt >= 4) {
                                 lastError = new Exception(policy.message);
                                 break;
                             }
@@ -516,7 +516,7 @@ public class LaibaChatEngine {
                             retryDelay = policy.delayMillis;
 
                         } else {
-                            if (attempt >= 0 || !isRetryable(failure)) break;
+                            if (attempt >= 4 || !isRetryable(failure)) break;
                             retryDelay = ApiRateLimitHandler.backoffDelay(attempt);
                         }
 
