@@ -1265,14 +1265,6 @@ public class MainActivity extends Activity {
 
     private void sendChatMessage(String message) {
 
-        if (!hasInternetConnection()) {
-            if (chatInput != null) {
-                chatInput.setText(message);
-            }
-            updateInternetStatus(false);
-            return;
-        }
-
         final View pendingUserBubble = addChatBubble(message, true);
         if (chatScroll != null) chatScroll.post(() ->
             chatScroll.fullScroll(View.FOCUS_DOWN));
@@ -1285,22 +1277,15 @@ public class MainActivity extends Activity {
 
         showChatLoadingIndicator();
 
-        final String key;
+        // A local-memory answer must work even without an API key.
+        // An empty key is rejected by the engine only if Gemini is needed.
+        String loadedKey = "";
         try {
-            key = loadApiKeySecurely();
-            if (key == null || key.trim().isEmpty()) {
-                throw new Exception(
-                    "Gemini API key is missing. Please reconnect it in Settings.");
-            }
-        } catch (Exception e) {
-            removeChatLoadingIndicator();
-            chatSending = false;
-            removePendingChatBubble(pendingUserBubble);
-            if (chatSendButton != null) chatSendButton.setText("↑");
-            addChatBubble("Laiba: " + e.getMessage(), false);
-            restoreFailedMessage(message);
-            return;
+            loadedKey = loadApiKeySecurely();
+        } catch (Exception ignored) {
         }
+
+        final String key = loadedKey == null ? "" : loadedKey.trim();
 
         activeChatRequest = LaibaChatEngine.send(
             this, key, message, new LaibaChatEngine.Callback() {
