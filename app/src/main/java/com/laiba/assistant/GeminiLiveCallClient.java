@@ -236,6 +236,15 @@ public final class GeminiLiveCallClient {
                 return;
             }
 
+            // Read top-level interaction status independently of serverContent.
+            String status = message.optString("interactionStatus", "");
+
+            if ("IN_PROGRESS".equals(status)) {
+                callback.onStatus("Laiba is thinking...");
+            } else if ("IDLE".equals(status)) {
+                callback.onStatus("Listening...");
+            }
+
             JSONObject server = message.optJSONObject("serverContent");
             if (server == null) return;
 
@@ -272,16 +281,6 @@ public final class GeminiLiveCallClient {
                         }
                     }
                 }
-            }
-
-            // Gemini 3.8 Extended Thinking sends interactionStatus
-            // at the top-level server message, not inside serverContent.
-            String status = message.optString("interactionStatus", "");
-
-            if ("IN_PROGRESS".equals(status)) {
-                callback.onStatus("Laiba is thinking...");
-            } else if ("IDLE".equals(status)) {
-                callback.onStatus("Listening...");
             }
 
         } catch (Exception error) {
