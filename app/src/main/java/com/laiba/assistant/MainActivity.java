@@ -2,6 +2,21 @@ package com.laiba.assistant;
 
 import android.app.Activity;
 
+import android.os.Build;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
+import android.util.Base64;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.security.KeyStore;
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
+
+
 
 
 
@@ -32,6 +47,18 @@ public class MainActivity extends Activity {
     private LinearLayout page;
     private int menuState = 0;
     private int setupPage = 0;
+    private LinearLayout chatMessages;
+    private ScrollView chatScroll;
+    private boolean chatSending = false;
+    private View chatLoadingIndicator;
+    private LaibaChatEngine.Request activeChatRequest;
+    private TextView chatSendButton;
+    private LinearLayout streamingBubble;
+    private String streamingReplyText = "";
+    private InternetConnectionManager internetConnectionManager;
+    private TextView networkStatusBanner;
+    private EditText chatInput;
+
 
 
     @Override public void onCreate(Bundle b) {
@@ -39,6 +66,39 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
         showSplash();
+    }
+
+    @Override protected void onStart() {
+        super.onStart();
+
+        if (internetConnectionManager == null) {
+            internetConnectionManager =
+                new InternetConnectionManager(this);
+        }
+
+        internetConnectionManager.start(this::updateInternetStatus);
+    }
+
+    @Override protected void onStop() {
+        if (internetConnectionManager != null) {
+            internetConnectionManager.stop();
+        }
+        super.onStop();
+    }
+
+    private boolean hasInternetConnection() {
+        return InternetConnectionManager.hasValidatedInternet(this);
+    }
+
+    private void updateInternetStatus(boolean available) {
+        if (networkStatusBanner == null ||
+                networkStatusBanner.getParent() == null) {
+            return;
+        }
+
+        networkStatusBanner.setVisibility(
+            available ? View.GONE : View.VISIBLE
+        );
     }
 
     private GradientDrawable shape(int color, int radius, int stroke, int strokeColor) {
@@ -66,6 +126,29 @@ public class MainActivity extends Activity {
         page = column(); page.setPadding(22, 18, 22, 18);
         root.addView(page, new FrameLayout.LayoutParams(-1, -1));
         setContentView(root);
+
+        // Keep screens clear of the Android status and navigation bars.
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            int topInset;
+            int bottomInset;
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                int bars = android.view.WindowInsets.Type.statusBars()
+                    | android.view.WindowInsets.Type.navigationBars()
+                    | android.view.WindowInsets.Type.displayCutout();
+                android.graphics.Insets safe = insets.getInsets(bars);
+                topInset = safe.top;
+                bottomInset = safe.bottom;
+            } else {
+                topInset = insets.getSystemWindowInsetTop();
+                bottomInset = insets.getSystemWindowInsetBottom();
+            }
+            page.setPadding(
+                dp(22), topInset + dp(18),
+                dp(22), bottomInset + dp(18)
+            );
+            return insets;
+        });
+        root.requestApplyInsets();
     }
     private void gap(LinearLayout l, int h) {
         View v = new View(this); l.addView(v, new LinearLayout.LayoutParams(1, h));
@@ -81,6 +164,24 @@ public class MainActivity extends Activity {
                 new int[]{cyan, blue, purple});
         g.setShape(GradientDrawable.OVAL); g.setStroke(3, Color.rgb(105,190,255));
         o.setBackground(g); o.setElevation(18); return o;
+    }
+
+    private TextView createBackButton() {
+        TextView back = text("‹", 34, Color.WHITE, true);
+        back.setGravity(Gravity.CENTER);
+        back.setIncludeFontPadding(false);
+        back.setContentDescription("Back");
+
+        GradientDrawable gradient = new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            new int[]{cyan, blue, purple}
+        );
+        gradient.setShape(GradientDrawable.OVAL);
+        gradient.setStroke(dp(1.5f), 0xffc5f4ff);
+
+        back.setBackground(gradient);
+        back.setElevation(dp(8));
+        return back;
     }
 
     private void showSplash() {
@@ -188,7 +289,7 @@ public class MainActivity extends Activity {
                 @Override
                 public void onAnimationEnd(
                     android.animation.Animator animation) {
-                    showVerification();
+                    startStoredKeyCheck();
                 }
             });
 
@@ -241,9 +342,15 @@ public class MainActivity extends Activity {
     private class SplashOrbView extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final long start = System.currentTimeMillis();
+        private final float radiusDp;
 
         SplashOrbView() {
+            this(72f);
+        }
+
+        SplashOrbView(float radiusDp) {
             super(MainActivity.this);
+            this.radiusDp = radiusDp;
         }
 
         @Override protected void onDraw(Canvas canvas) {
@@ -251,7 +358,7 @@ public class MainActivity extends Activity {
 
             float cx = getWidth() / 2f;
             float cy = getHeight() / 2f;
-            float r = dp(72);
+            float r = dp(radiusDp);
             float t = (System.currentTimeMillis() - start) / 1000f;
 
             paint.setStyle(Paint.Style.STROKE);
@@ -427,7 +534,7 @@ public class MainActivity extends Activity {
 
     private void authHeader(String title) {
         LinearLayout header = row();
-        TextView back = text("‹", 34, cyan, true);
+        TextView back = createBackButton();
         header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
         back.setOnClickListener(v -> showVerification());
 
@@ -440,29 +547,166 @@ public class MainActivity extends Activity {
         page.addView(header);
     }
 
+
+    private static final String SAFE_KEY_ALIAS = "LaibaGeminiSafeKey";
+
+    private SecretKey getSafeEncryptionKey() throws Exception {
+        KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
+        ks.load(null);
+
+        if (ks.containsAlias(SAFE_KEY_ALIAS)) {
+            return (SecretKey) ks.getKey(SAFE_KEY_ALIAS, null);
+        }
+
+        KeyGenerator generator = KeyGenerator.getInstance(
+            KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+
+        generator.init(new KeyGenParameterSpec.Builder(
+            SAFE_KEY_ALIAS,
+            KeyProperties.PURPOSE_ENCRYPT |
+            KeyProperties.PURPOSE_DECRYPT)
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(
+                KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setRandomizedEncryptionRequired(true)
+            .build());
+
+        return generator.generateKey();
+    }
+
+    private void saveApiKeySecurely(String apiKey) throws Exception {
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.ENCRYPT_MODE, getSafeEncryptionKey());
+
+        byte[] encrypted = cipher.doFinal(
+            apiKey.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        File safeFolder = new File(getFilesDir(), "safe");
+        if (!safeFolder.exists() && !safeFolder.mkdirs()) {
+            throw new Exception("Secure storage unavailable");
+        }
+
+        File keyFile = new File(safeFolder, "gemini.key");
+        try (FileOutputStream out = new FileOutputStream(keyFile)) {
+            out.write(Base64.encode(cipher.getIV(), Base64.NO_WRAP));
+            out.write('\n');
+            out.write(Base64.encode(encrypted, Base64.NO_WRAP));
+            out.flush();
+            keyFile.setReadable(false, false);
+            keyFile.setWritable(false, false);
+            keyFile.setReadable(true, true);
+            keyFile.setWritable(true, true);
+        }
+    }
+
+
+    private String loadApiKeySecurely() throws Exception {
+        File file = new File(new File(getFilesDir(), "safe"), "gemini.key");
+        if (!file.isFile()) return null;
+
+        java.io.BufferedReader reader = new java.io.BufferedReader(
+            new java.io.InputStreamReader(
+                new java.io.FileInputStream(file),
+                java.nio.charset.StandardCharsets.UTF_8));
+
+        String ivLine;
+        String encryptedLine;
+        try {
+            ivLine = reader.readLine();
+            encryptedLine = reader.readLine();
+        } finally {
+            reader.close();
+        }
+
+        if (ivLine == null || encryptedLine == null) return null;
+
+        byte[] iv = Base64.decode(ivLine, Base64.NO_WRAP);
+        byte[] encrypted = Base64.decode(encryptedLine, Base64.NO_WRAP);
+
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.DECRYPT_MODE, getSafeEncryptionKey(),
+            new GCMParameterSpec(128, iv));
+
+        return new String(cipher.doFinal(encrypted),
+            java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private void startStoredKeyCheck() {
+        new Thread(() -> {
+            try {
+                String key = loadApiKeySecurely();
+                if (key == null || key.trim().isEmpty()) {
+                    runOnUiThread(this::showVerification);
+                    return;
+                }
+
+                if (!hasInternetConnection()) {
+                    runOnUiThread(this::showChat);
+                    return;
+                }
+
+                if (!verifyGoogleApiKey(key)) {
+                    runOnUiThread(this::showVerification);
+                    return;
+                }
+
+                runOnUiThread(this::showChat);
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    if (hasInternetConnection()) {
+                        showVerification();
+                    } else {
+                        showChat();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private boolean verifyGoogleApiKey(String apiKey) throws Exception {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(
+                "https://generativelanguage.googleapis.com/v1beta/models");
+
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("x-goog-api-key", apiKey);
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(15000);
+            connection.setInstanceFollowRedirects(false);
+
+            return connection.getResponseCode() == 200;
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
     private void showApiKeyPage() {
         setupPage = 2;
         base();
         authHeader("GEMINI API SETUP");
 
-        View spacer = new View(this);
-        page.addView(spacer, new LinearLayout.LayoutParams(1, 0, .2f));
-
+        gap(page, dp(30));
         page.addView(orb(35),
             new LinearLayout.LayoutParams(dp(76), dp(76)));
         gap(page, dp(18));
+
         page.addView(text("Connect Gemini API",
             23, Color.WHITE, true));
         gap(page, dp(7));
-        page.addView(text("Enter your Gemini API key below.",
+
+        page.addView(text("Enter your Google Gemini API key.",
             13, 0xffaab8df, false));
 
         gap(page, dp(22));
+
         LinearLayout card = column();
         card.setPadding(dp(16), dp(20), dp(16), dp(20));
         card.setBackground(shape(panel, dp(22), dp(1), 0xff315bce));
 
-        TextView label = text("Gemini API Key", 14, Color.WHITE, true);
+        TextView label = text("Gemini API Key",
+            14, Color.WHITE, true);
         label.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         card.addView(label);
         gap(card, dp(10));
@@ -473,28 +717,74 @@ public class MainActivity extends Activity {
         keyInput.setTextColor(Color.WHITE);
         keyInput.setHintTextColor(0xff8296c2);
         keyInput.setHint("Enter API key");
-        keyInput.setInputType( android.text.InputType.TYPE_CLASS_TEXT
-            | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        keyInput.setInputType(
+            android.text.InputType.TYPE_CLASS_TEXT |
+            android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
         keyInput.setPadding(dp(14), dp(13), dp(14), dp(13));
         keyInput.setBackground(shape(bg, dp(14), dp(1), 0xff42659d));
-        card.addView(keyInput, new LinearLayout.LayoutParams(-1, -2));
+        card.addView(keyInput,
+            new LinearLayout.LayoutParams(-1, -2));
+
         gap(card, dp(15));
 
-        TextView continueButton = pill("Continue", blue);
+        TextView continueButton = pill("Verify & Continue", blue);
         card.addView(continueButton,
             new LinearLayout.LayoutParams(-1, -2));
 
-        gap(card, dp(9));
-        card.addView(text("The key is not saved or verified in this preview.",
-            11, 0xffaab8df, false));
+        TextView status = text("", 12, 0xffaab8df, false);
+        card.addView(status);
+        page.addView(card,
+            new LinearLayout.LayoutParams(-1, -2));
 
-        page.addView(card, new LinearLayout.LayoutParams(-1, -2));
         gap(page, dp(12));
-        page.addView(text("UI PREVIEW ONLY • API verification is inactive",
+        page.addView(text("Encrypted Android private storage",
             11, 0xff8296c2, false));
 
-        View bottom = new View(this);
-        page.addView(bottom, new LinearLayout.LayoutParams(1, 0, .2f));
+        continueButton.setOnClickListener(v -> {
+            String key = keyInput.getText().toString().trim();
+
+            if (key.isEmpty() || key.length() < 20) {
+                status.setText("Please enter a valid API key.");
+                return;
+            }
+
+            if (!hasInternetConnection()) {
+                status.setText(
+                    "No internet connection. Connect and try again."
+                );
+                return;
+            }
+
+            continueButton.setEnabled(false);
+            status.setText("Verifying with Google...");
+
+            new Thread(() -> {
+                try {
+                    if (!verifyGoogleApiKey(key)) {
+                        runOnUiThread(() -> {
+                            continueButton.setEnabled(true);
+                            status.setText(
+                                "Google rejected this API key.");
+                        });
+                        return;
+                    }
+
+                    saveApiKeySecurely(key);
+
+                    runOnUiThread(() -> {
+                        keyInput.setText("");
+                        showChat();
+                    });
+
+                } catch (Exception e) {
+                    runOnUiThread(() -> {
+                        continueButton.setEnabled(true);
+                        status.setText(
+                            "Verification or secure storage failed.");
+                    });
+                }
+            }).start();
+        });
     }
 
     private void showCallScreen() {
@@ -720,50 +1010,41 @@ public class MainActivity extends Activity {
             new LinearLayout.LayoutParams(35,45));
 
         page.addView(header);
+
+        networkStatusBanner = text(
+            "No internet connection. Check Wi-Fi or mobile data.",
+            12, 0xffffc2ce, true
+        );
+        networkStatusBanner.setPadding(
+            dp(12), dp(10), dp(12), dp(10)
+        );
+        networkStatusBanner.setBackground(
+            shape(0xff39202d, dp(13), dp(1), 0xffa34d69)
+        );
+
+        page.addView(
+            networkStatusBanner,
+            new LinearLayout.LayoutParams(-1, -2)
+        );
+
+        updateInternetStatus(hasInternetConnection());
+
         gap(page, 6);
         page.addView(text("✦", 46, cyan, true));
         page.addView(text("Good evening", 24, Color.WHITE, true));
         page.addView(text("How can I help you today?", 14, 0xffaab8df, false));
 
-        // Temporary welcome message: UI only, not saved as chat history.
-        gap(page, 12);
-        LinearLayout welcomeRow = row();
-        welcomeRow.setGravity(Gravity.TOP | Gravity.LEFT);
 
-        ImageView laibaIcon = new ImageView(this);
-        laibaIcon.setImageDrawable(
-            getPackageManager().getApplicationIcon(getApplicationInfo())
-        );
-        laibaIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        laibaIcon.setPadding(dp(5), dp(5), dp(5), dp(5));
-        laibaIcon.setBackground(
-            shape(0xff203b68, dp(18), dp(1), 0xff3279c8)
-        );
-        LinearLayout.LayoutParams iconParams =
-            new LinearLayout.LayoutParams(dp(38), dp(38));
-        iconParams.rightMargin = dp(8);
-        welcomeRow.addView(laibaIcon, iconParams);
+        chatScroll = new ScrollView(this);
+        chatScroll.setFillViewport(false);
+        chatMessages = column();
+        chatLoadingIndicator = null;
+        chatMessages.setGravity(Gravity.TOP);
+        chatMessages.setPadding(0, dp(8), 0, dp(12));
+        chatScroll.addView(chatMessages, new ScrollView.LayoutParams(-1, -2));
+        page.addView(chatScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        renderChatHistory();
 
-        TextView welcomeMessage = text(
-            "السلام علیکم! میں لائبہ ہوں۔\n" +
-            "آپ کی ذاتی AI اسسٹنٹ۔ بتائیے، آج میں آپ کی کیا مدد کر سکتی ہوں؟",
-            14, 0xffe7efff, false
-        );
-        welcomeMessage.setTextIsSelectable(true);
-        welcomeMessage.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
-        welcomeMessage.setPadding(dp(13), dp(11), dp(13), dp(11));
-        welcomeMessage.setBackground(
-            shape(0xff192640, dp(18), dp(1), 0xff30496c)
-        );
-        welcomeRow.addView(
-            welcomeMessage,
-            new LinearLayout.LayoutParams(0, -2, 1)
-        );
-
-        page.addView(welcomeRow,
-            new LinearLayout.LayoutParams(-1, -2));
-        gap(page, 16);
-        View spacer = new View(this); page.addView(spacer,new LinearLayout.LayoutParams(1,0,1));
         LinearLayout composer = row();
         composer.setPadding(dp(10), dp(6), dp(8), dp(6));
         composer.setBackground(shape(0xff171e38, dp(28), 1, 0xff354568));
@@ -773,6 +1054,7 @@ public class MainActivity extends Activity {
         composer.addView(plus, new LinearLayout.LayoutParams(dp(42), dp(42)));
 
         EditText input = new EditText(this);
+        chatInput = input;
         input.setHint("Message Laiba…");
         input.setHintTextColor(0xff929fbe);
         input.setTextColor(Color.WHITE);
@@ -796,6 +1078,7 @@ public class MainActivity extends Activity {
         call.setOnClickListener(v -> showCallScreen());
 
         TextView send = text("↑", 24, Color.WHITE, true);
+        chatSendButton = send;
         send.setBackground(shape(0xff3185ff, dp(24), 0, 0));
         send.setElevation(dp(3));
 
@@ -808,6 +1091,20 @@ public class MainActivity extends Activity {
         composer.addView(actionSlot,
             new LinearLayout.LayoutParams(dp(44), dp(44)));
 
+
+        send.setOnClickListener(v -> {
+            if (chatSending) {
+                LaibaChatEngine.Request running = activeChatRequest;
+                if (running != null) running.cancel();
+                return;
+            }
+
+            String message = input.getText().toString().trim();
+            if (message.isEmpty()) return;
+            input.setText("");
+            sendChatMessage(message);
+        });
+
         input.addTextChangedListener(new android.text.TextWatcher() {
             @Override public void beforeTextChanged(
                 CharSequence s, int start, int count, int after) {}
@@ -815,8 +1112,9 @@ public class MainActivity extends Activity {
             @Override public void onTextChanged(
                 CharSequence s, int start, int before, int count) {
                 boolean hasText = s != null && s.toString().trim().length() > 0;
-                call.setVisibility(hasText ? View.GONE : View.VISIBLE);
-                send.setVisibility(hasText ? View.VISIBLE : View.GONE);
+                call.setVisibility(hasText || chatSending ? View.GONE : View.VISIBLE);
+                send.setVisibility(hasText || chatSending ? View.VISIBLE : View.GONE);
+                send.setText(chatSending ? "■" : "↑");
             }
 
             @Override public void afterTextChanged(
@@ -825,6 +1123,287 @@ public class MainActivity extends Activity {
 
         page.addView(composer, new LinearLayout.LayoutParams(-1, -2));
         gap(page, 8);
+    }
+
+
+    private void renderChatHistory() {
+        if (chatMessages == null) return;
+        chatMessages.removeAllViews();
+        org.json.JSONArray items = LaibaChatEngine.history(this);
+        if (items.length() == 0) {
+            TextView welcome = text(
+                "السلام علیکم! میں لائبہ ہوں۔\nآپ کی ذاتی AI اسسٹنٹ۔ بتائیے، آج میں آپ کی کیا مدد کر سکتی ہوں؟",
+                14, 0xffe7efff, false);
+            welcome.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+            welcome.setPadding(dp(14), dp(12), dp(14), dp(12));
+            welcome.setBackground(shape(0xff192640, dp(18), dp(1), 0xff30496c));
+            chatMessages.addView(welcome, new LinearLayout.LayoutParams(-1, -2));
+        }
+        for (int i = 0; i < items.length(); i++) {
+            org.json.JSONObject item = items.optJSONObject(i);
+            if (item == null) continue;
+            addChatBubble(item.optString("text"),
+                "user".equals(item.optString("role")));
+        }
+        if (chatScroll != null) chatScroll.post(() ->
+            chatScroll.fullScroll(View.FOCUS_DOWN));
+    }
+
+    private View addChatBubble(String value, boolean user) {
+        View bubble;
+
+        if (user) {
+            TextView userBubble = text(value, 14, Color.WHITE, false);
+            userBubble.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+            userBubble.setTextIsSelectable(true);
+            userBubble.setPadding(dp(14), dp(11), dp(14), dp(11));
+            userBubble.setBackground(shape(
+                0xff174b91, dp(18), dp(1), 0xff367fd0));
+            bubble = userBubble;
+
+        } else {
+            LinearLayout assistantBubble = new LinearLayout(this);
+            assistantBubble.setOrientation(LinearLayout.VERTICAL);
+            assistantBubble.setGravity(Gravity.LEFT | Gravity.TOP);
+            assistantBubble.setPadding(
+                dp(14), dp(11), dp(14), dp(11));
+            assistantBubble.setBackground(shape(
+                0xff192640, dp(18), dp(1), 0xff30496c));
+
+            ChatMessageRenderer.populate(
+                assistantBubble, this, value,
+                0xffe7efff, 0xff101a31, 0xffa9e7ff, cyan);
+
+            bubble = assistantBubble;
+        }
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            user ? (int)(getResources().getDisplayMetrics().widthPixels * .82f) : -1,
+            -2);
+        lp.gravity = user ? Gravity.RIGHT : Gravity.LEFT;
+        lp.bottomMargin = dp(10);
+        chatMessages.addView(bubble, lp);
+        return bubble;
+    }
+
+    private void removePendingChatBubble(View bubble) {
+        if (bubble != null && bubble.getParent() instanceof ViewGroup) {
+            ((ViewGroup) bubble.getParent()).removeView(bubble);
+        }
+    }
+
+    private void showChatLoadingIndicator() {
+        if (chatMessages == null || chatLoadingIndicator != null) return;
+
+        LinearLayout loadingRow = row();
+        loadingRow.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+
+        SplashOrbView logo = new SplashOrbView(24f);
+        loadingRow.addView(logo,
+            new LinearLayout.LayoutParams(dp(92), dp(68)));
+
+        LinearLayout.LayoutParams params =
+            new LinearLayout.LayoutParams(-1, -2);
+        params.gravity = Gravity.LEFT;
+        params.bottomMargin = dp(10);
+        chatMessages.addView(loadingRow, params);
+        chatLoadingIndicator = loadingRow;
+
+        if (chatScroll != null) chatScroll.post(() ->
+            chatScroll.fullScroll(View.FOCUS_DOWN));
+    }
+
+    private void removeChatLoadingIndicator() {
+        if (chatLoadingIndicator == null) return;
+        View indicator = chatLoadingIndicator;
+        chatLoadingIndicator = null;
+        if (indicator.getParent() instanceof ViewGroup) {
+            ((ViewGroup) indicator.getParent()).removeView(indicator);
+        }
+    }
+
+    private void restoreFailedMessage(String message) {
+        if (chatInput == null) return;
+
+        if (chatInput.getText().toString().trim().isEmpty()) {
+            chatInput.setText(message);
+            chatInput.setSelection(chatInput.getText().length());
+        }
+    }
+
+    private void sendChatMessage(String message) {
+
+        if (!hasInternetConnection()) {
+            if (chatInput != null) {
+                chatInput.setText(message);
+            }
+            updateInternetStatus(false);
+            return;
+        }
+
+        final View pendingUserBubble = addChatBubble(message, true);
+        if (chatScroll != null) chatScroll.post(() ->
+            chatScroll.fullScroll(View.FOCUS_DOWN));
+
+        chatSending = true;
+        if (chatSendButton != null) {
+            chatSendButton.setText("■");
+            chatSendButton.setVisibility(View.VISIBLE);
+        }
+
+        showChatLoadingIndicator();
+
+        final String key;
+        try {
+            key = loadApiKeySecurely();
+            if (key == null || key.trim().isEmpty()) {
+                throw new Exception(
+                    "Gemini API key is missing. Please reconnect it in Settings.");
+            }
+        } catch (Exception e) {
+            removeChatLoadingIndicator();
+            chatSending = false;
+            removePendingChatBubble(pendingUserBubble);
+            if (chatSendButton != null) chatSendButton.setText("↑");
+            addChatBubble("Laiba: " + e.getMessage(), false);
+            restoreFailedMessage(message);
+            return;
+        }
+
+        activeChatRequest = LaibaChatEngine.send(
+            this, key, message, new LaibaChatEngine.Callback() {
+
+            @Override public void onStream(String partialReply) {
+                runOnUiThread(() -> {
+                    if (!chatSending) return;
+
+                    removeChatLoadingIndicator();
+
+                    if (partialReply == null || partialReply.isEmpty()) {
+                        if (streamingBubble != null) {
+                            if (streamingBubble.getParent() instanceof ViewGroup) {
+                                ((ViewGroup) streamingBubble.getParent())
+                                    .removeView(streamingBubble);
+                            }
+                            streamingBubble = null;
+                        }
+                        streamingReplyText = "";
+                        return;
+                    }
+
+                    streamingReplyText = partialReply;
+
+                    if (streamingBubble == null) {
+                        streamingBubble = new LinearLayout(
+                            MainActivity.this);
+                        streamingBubble.setOrientation(
+                            LinearLayout.VERTICAL);
+                        streamingBubble.setGravity(
+                            Gravity.LEFT | Gravity.TOP);
+                        streamingBubble.setPadding(
+                            dp(14), dp(11), dp(14), dp(11));
+                        streamingBubble.setBackground(shape(
+                            0xff192640, dp(18), dp(1), 0xff30496c));
+
+                        LinearLayout.LayoutParams params =
+                            new LinearLayout.LayoutParams(-1, -2);
+                        params.gravity = Gravity.LEFT;
+                        params.bottomMargin = dp(10);
+                        chatMessages.addView(streamingBubble, params);
+                    }
+
+                    ChatMessageRenderer.populate(
+                        streamingBubble, MainActivity.this,
+                        partialReply + "▍",
+                        0xffe7efff, 0xff101a31, 0xffa9e7ff, cyan);
+
+                    if (chatScroll != null) chatScroll.post(() ->
+                        chatScroll.fullScroll(View.FOCUS_DOWN));
+                });
+            }
+
+            @Override public void onReply(String reply) {
+                runOnUiThread(() -> {
+                    removeChatLoadingIndicator();
+                    chatSending = false;
+                    activeChatRequest = null;
+
+                    if (streamingBubble != null) {
+                        ChatMessageRenderer.populate(
+                            streamingBubble, MainActivity.this, reply,
+                            0xffe7efff, 0xff101a31, 0xffa9e7ff, cyan);
+                        streamingBubble = null;
+                        streamingReplyText = "";
+                    } else {
+                        addChatBubble(reply, false);
+                    }
+
+                    if (chatSendButton != null) {
+                        chatSendButton.setText("↑");
+                        chatSendButton.setVisibility(View.GONE);
+                    }
+
+                    if (chatScroll != null) chatScroll.post(() ->
+                        chatScroll.fullScroll(View.FOCUS_DOWN));
+                });
+            }
+
+            @Override public void onError(String error) {
+                runOnUiThread(() -> {
+                    removeChatLoadingIndicator();
+                    chatSending = false;
+                    activeChatRequest = null;
+                    removePendingChatBubble(pendingUserBubble);
+
+                    if (streamingBubble != null) {
+                        ChatMessageRenderer.populate(
+                            streamingBubble, MainActivity.this,
+                            streamingReplyText +
+                                "\n\nConnection interrupted: " + error,
+                            0xffe7efff, 0xff101a31, 0xffa9e7ff, cyan);
+                        streamingBubble = null;
+                        streamingReplyText = "";
+                    } else {
+                        addChatBubble(
+                            "پیغام بھیجنے میں مسئلہ ہوا: " + error, false);
+                    }
+
+                    if (chatSendButton != null) {
+                        chatSendButton.setText("↑");
+                        chatSendButton.setVisibility(View.GONE);
+                    }
+
+                    restoreFailedMessage(message);
+                });
+            }
+
+            @Override public void onCancelled() {
+                runOnUiThread(() -> {
+                    removeChatLoadingIndicator();
+                    chatSending = false;
+                    activeChatRequest = null;
+                    removePendingChatBubble(pendingUserBubble);
+
+                    if (streamingBubble != null) {
+                        String partial = streamingReplyText;
+                        ChatMessageRenderer.populate(
+                            streamingBubble, MainActivity.this,
+                            partial.isEmpty() ? "Generation stopped." :
+                                partial + "\n\n[Generation stopped]",
+                            0xffe7efff, 0xff101a31, 0xffa9e7ff, cyan);
+                        streamingBubble = null;
+                        streamingReplyText = "";
+                    }
+
+                    if (chatSendButton != null) {
+                        chatSendButton.setText("↑");
+                        chatSendButton.setVisibility(View.GONE);
+                    }
+
+                    restoreFailedMessage(message);
+                });
+            }
+        });
     }
 
     private void addMenuItem(LinearLayout target, String symbol,
@@ -854,7 +1433,11 @@ public class MainActivity extends Activity {
             new LinearLayout.LayoutParams(-1, -2);
         lp.bottomMargin = dp(13);
         target.addView(card, lp);
-        card.setOnClickListener(v -> showMenuPreview(title, description, symbol));
+        card.setOnClickListener(v -> {
+            if ("Chat History".equals(title)) showChatHistory();
+            else if ("Token Usage".equals(title)) showTokenUsage();
+            else showMenuPreview(title, description, symbol);
+        });
     }
 
     private void showMenu() {
@@ -862,7 +1445,7 @@ public class MainActivity extends Activity {
         base();
 
         LinearLayout header = row();
-        TextView back = text("‹", 34, cyan, true);
+        TextView back = createBackButton();
         header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
         back.setOnClickListener(v -> showChat());
 
@@ -899,6 +1482,7 @@ public class MainActivity extends Activity {
         LinearLayout items = column();
         items.setPadding(dp(1), dp(2), dp(1), dp(12));
         addMenuItem(items, "◷", "Chat History", "Past conversations");
+        addMenuItem(items, "◈", "Token Usage", "API tokens and usage analytics");
         addMenuItem(items, "◉", "Call History", "Voice sessions");
         addMenuItem(items, "✧", "AI Tools", "Your smart toolkit");
         addMenuItem(items, "⚙", "Settings", "Personalize Laiba");
@@ -909,12 +1493,196 @@ public class MainActivity extends Activity {
         page.addView(text("LAIBA  •  PERSONAL AI", 10, 0xff7187b8, true));
     }
 
+
+    private void showChatHistory() {
+        menuState = 2;
+        base();
+        LinearLayout header = row();
+        TextView back = createBackButton();
+        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        back.setOnClickListener(v -> showMenu());
+        header.addView(text("CHAT HISTORY", 16, Color.WHITE, true));
+        page.addView(header);
+        gap(page, dp(12));
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout list = column();
+        list.setGravity(Gravity.TOP);
+        org.json.JSONArray items = LaibaChatEngine.history(this);
+        for (int i = 0; i < items.length(); i++) {
+            org.json.JSONObject item = items.optJSONObject(i);
+            if (item == null) continue;
+            TextView line = text(
+                ("user".equals(item.optString("role")) ? "You: " : "Laiba: ") +
+                item.optString("text"), 13, 0xffe7efff, false);
+            line.setGravity(Gravity.LEFT);
+            line.setPadding(dp(12), dp(10), dp(12), dp(10));
+            line.setBackground(shape(0xff192640, dp(14), 1, 0xff30496c));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.bottomMargin = dp(7);
+            list.addView(line, lp);
+        }
+        if (items.length() == 0)
+            list.addView(text("No saved messages yet.", 14, 0xffaab8df, false));
+        scroll.addView(list);
+        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+    }
+
+    private String usageNumber(long value) {
+        return String.format(java.util.Locale.US, "%,d", value);
+    }
+
+    private void usageMetric(
+            LinearLayout target, String title, String value, String subtitle) {
+
+        LinearLayout card = column();
+        card.setGravity(Gravity.LEFT);
+        card.setPadding(dp(14), dp(14), dp(14), dp(14));
+        card.setBackground(shape(
+                0xff152344, dp(17), dp(1), 0xff31558c));
+
+        TextView heading = text(title, 12, 0xffaab8df, true);
+        heading.setGravity(Gravity.LEFT);
+        card.addView(heading);
+
+        TextView number = text(value, 22, Color.WHITE, true);
+        number.setGravity(Gravity.LEFT);
+        card.addView(number);
+
+        TextView detail = text(subtitle, 10, 0xffaab8df, false);
+        detail.setGravity(Gravity.LEFT);
+        card.addView(detail);
+
+        LinearLayout.LayoutParams lp =
+                new LinearLayout.LayoutParams(-1, -2);
+        lp.bottomMargin = dp(9);
+        target.addView(card, lp);
+    }
+
+    private void showTokenUsage() {
+        menuState = 2;
+        base();
+
+        LinearLayout header = row();
+        TextView back = createBackButton();
+        header.addView(back,
+                new LinearLayout.LayoutParams(dp(48), dp(48)));
+        back.setOnClickListener(v -> showMenu());
+
+        header.addView(text("TOKEN USAGE", 16, Color.WHITE, true));
+        page.addView(header);
+        gap(page, dp(12));
+
+        org.json.JSONObject stats = TokenUsageManager.summary(this);
+
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout content = column();
+        content.setGravity(Gravity.TOP);
+        content.setPadding(0, dp(3), 0, dp(12));
+
+        content.addView(text(
+                "GEMINI API ANALYTICS", 11, cyan, true));
+        gap(content, dp(12));
+
+        usageMetric(content, "TODAY",
+                usageNumber(stats.optLong("dayTotal", 0)),
+                "Input: " + usageNumber(stats.optLong("dayInput", 0))
+                        + "  •  Output: "
+                        + usageNumber(stats.optLong("dayOutput", 0)));
+
+        usageMetric(content, "THIS WEEK",
+                usageNumber(stats.optLong("weekTotal", 0)),
+                "Input: " + usageNumber(stats.optLong("weekInput", 0))
+                        + "  •  Output: "
+                        + usageNumber(stats.optLong("weekOutput", 0)));
+
+        usageMetric(content, "THIS MONTH",
+                usageNumber(stats.optLong("monthTotal", 0)),
+                "Input: " + usageNumber(stats.optLong("monthInput", 0))
+                        + "  •  Output: "
+                        + usageNumber(stats.optLong("monthOutput", 0)));
+
+        gap(content, dp(8));
+        content.addView(text(
+                "REQUEST STATISTICS", 11, cyan, true));
+        gap(content, dp(10));
+
+        usageMetric(content, "API REQUESTS",
+                usageNumber(stats.optLong("requests", 0)),
+                "Successful: " + usageNumber(stats.optLong("successful", 0))
+                        + "  •  Failed: "
+                        + usageNumber(stats.optLong("failures", 0)));
+
+        usageMetric(content, "USAGE DATA NOT PROVIDED",
+                usageNumber(stats.optLong("unknownUsage", 0)),
+                "Requests for which Gemini did not return token metadata.");
+
+        gap(content, dp(8));
+        content.addView(text(
+                "RECENT API ACTIVITY", 11, cyan, true));
+        gap(content, dp(8));
+
+        org.json.JSONArray records = TokenUsageManager.records(this);
+        int shown = 0;
+
+        for (int i = records.length() - 1; i >= 0 && shown < 12; i--) {
+            org.json.JSONObject item = records.optJSONObject(i);
+            if (item == null) continue;
+
+            boolean success = item.optBoolean("success", false);
+            long timestamp = item.optLong("timestamp", 0);
+
+            String date = android.text.format.DateFormat.format(
+                    "dd MMM, HH:mm", timestamp).toString();
+
+            String tokens = item.optLong("totalTokens", -1) < 0
+                    ? "Token count unavailable"
+                    : usageNumber(item.optLong("totalTokens", 0))
+                            + " tokens";
+
+            String status = success ? "SUCCESS" : "FAILED";
+
+            TextView line = text(
+                    status + "  •  " + date + "\n" + tokens
+                            + "  •  Attempts: "
+                            + item.optInt("attempts", 0),
+                    12, success ? 0xffa9e7ff : 0xffffa8b5, false);
+
+            line.setGravity(Gravity.LEFT);
+            line.setPadding(dp(12), dp(11), dp(12), dp(11));
+            line.setBackground(shape(
+                    0xff192640, dp(13), dp(1), 0xff30496c));
+
+            LinearLayout.LayoutParams lp =
+                    new LinearLayout.LayoutParams(-1, -2);
+            lp.bottomMargin = dp(7);
+            content.addView(line, lp);
+            shown++;
+        }
+
+        if (shown == 0) {
+            content.addView(text(
+                    "No API activity recorded yet.",
+                    13, 0xffaab8df, false));
+        }
+
+        gap(content, dp(10));
+        content.addView(text(
+                "Token counts are based on Gemini usageMetadata. "
+                        + "Unavailable counts are not estimated. "
+                        + "No chat messages or API keys are stored here.",
+                11, 0xff8296c2, false));
+
+        scroll.addView(content);
+        page.addView(scroll,
+                new LinearLayout.LayoutParams(-1, 0, 1));
+    }
+
     private void showMenuPreview(String title, String description, String symbol) {
         menuState = 2;
         base();
 
         LinearLayout header = row();
-        TextView back = text("‹", 34, cyan, true);
+        TextView back = createBackButton();
         header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
         back.setOnClickListener(v -> showMenu());
         header.addView(text("COMMAND CENTER", 14, Color.WHITE, true));
@@ -935,9 +1703,6 @@ public class MainActivity extends Activity {
         page.addView(text("This section is a UI preview.", 12, 0xff7187b8, false));
         gap(page, 25);
 
-        TextView backButton = pill("‹   Back to Command Center", 0xff174b91);
-        page.addView(backButton);
-        backButton.setOnClickListener(v -> showMenu());
 
         View bottom = new View(this);
         page.addView(bottom, new LinearLayout.LayoutParams(1, 0, 0.45f));
@@ -948,7 +1713,9 @@ public class MainActivity extends Activity {
             showMenu();
         } else if (menuState == 1) {
             showChat();
-        } else if (setupPage == 1 || setupPage == 2) {
+        } else if (setupPage == 1) {
+            showMenu();
+        } else if (setupPage == 2) {
             showVerification();
         } else if (setupPage == 0) {
             // Stay on verification; never bypass it with Back.
