@@ -37,7 +37,7 @@ public final class GeminiLiveCallClient {
 
     private static final String ENDPOINT =
         "wss://generativelanguage.googleapis.com/ws/" +
-        "google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent";
+        "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 
     private final Callback callback;
     private final OkHttpClient http;
@@ -152,8 +152,8 @@ public final class GeminiLiveCallClient {
             realtime.put("automaticActivityDetection",
                 new JSONObject()
                     .put("disabled", false)
-                    .put("startOfSpeechSensitivity", "START_SENSITIVITY_MEDIUM")
-                    .put("endOfSpeechSensitivity", "END_SENSITIVITY_MEDIUM")
+                    .put("startOfSpeechSensitivity", "START_SENSITIVITY_HIGH")
+                    .put("endOfSpeechSensitivity", "END_SENSITIVITY_LOW")
                     .put("silenceDurationMs", 500)
             );
             realtime.put("activityHandling", "START_OF_ACTIVITY_INTERRUPTS");
