@@ -20,13 +20,15 @@ public final class InternetConnectionManager {
 
     private volatile Listener listener;
     private boolean registered;
+    private volatile boolean lastPublished;
+    private volatile boolean hasPublished;
 
     private final ConnectivityManager.NetworkCallback callback =
         new ConnectivityManager.NetworkCallback() {
 
             @Override
             public void onAvailable(Network network) {
-                // Wait for onCapabilitiesChanged() for validated status.
+                publish(hasValidatedInternet(context));
             }
 
             @Override
@@ -57,6 +59,8 @@ public final class InternetConnectionManager {
     }
 
     public synchronized void start(Listener listener) {
+        if (listener == null) return;
+
         this.listener = listener;
 
         if (connectivityManager == null) {
@@ -80,6 +84,8 @@ public final class InternetConnectionManager {
     }
 
     public synchronized void stop() {
+        listener = null;
+
         if (registered && connectivityManager != null) {
             try {
                 connectivityManager.unregisterNetworkCallback(
@@ -90,7 +96,6 @@ public final class InternetConnectionManager {
         }
 
         registered = false;
-        listener = null;
     }
 
     public boolean hasValidatedInternet() {
@@ -104,7 +109,9 @@ public final class InternetConnectionManager {
             ConnectivityManager manager =
                 (ConnectivityManager) context
                     .getApplicationContext()
-                    .getSystemService(Context.CONNECTIVITY_SERVICE);
+                    .getSystemService(
+                        Context.CONNECTIVITY_SERVICE
+                    );
 
             if (manager == null) return false;
 
@@ -136,6 +143,15 @@ public final class InternetConnectionManager {
     private void publish(boolean available) {
         Listener target = listener;
         if (target == null) return;
+
+        synchronized (this) {
+            if (hasPublished && lastPublished == available) {
+                return;
+            }
+
+            lastPublished = available;
+            hasPublished = true;
+        }
 
         mainHandler.post(() -> {
             if (listener == target) {

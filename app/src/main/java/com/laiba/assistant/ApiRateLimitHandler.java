@@ -81,7 +81,8 @@ public final class ApiRateLimitHandler {
                 || status == 500 || status == 502
                 || status == 503 || status == 504
                 || (status == 403 && containsAny(combined,
-                    "quota", "rate limit", "resource_exhausted"));
+                    "quota", "rate limit", "rate_limit",
+                    "ratelimitexceeded", "resource_exhausted"));
 
         if (!retryable) {
             return new Policy(false, false, 0,

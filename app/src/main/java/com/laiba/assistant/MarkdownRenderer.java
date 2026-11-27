@@ -188,6 +188,14 @@ public final class MarkdownRenderer {
 
         while (i < value.length()) {
 
+            if (value.charAt(i) == '\\\\'
+                    && i + 1 < value.length()
+                    && "*_~`\\\\[]".indexOf(value.charAt(i + 1)) >= 0) {
+                out.append(value.charAt(i + 1));
+                i += 2;
+                continue;
+            }
+
             if (value.charAt(i) == '[') {
                 int closeLabel = value.indexOf("](", i + 1);
                 int closeUrl = closeLabel < 0 ? -1

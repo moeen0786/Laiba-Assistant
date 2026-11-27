@@ -96,6 +96,12 @@ public class MainActivity extends Activity {
             return;
         }
 
+        networkStatusBanner.setText(
+            available
+                ? "Internet connection restored."
+                : "No internet connection. Check Wi-Fi or mobile data."
+        );
+
         networkStatusBanner.setVisibility(
             available ? View.GONE : View.VISIBLE
         );
