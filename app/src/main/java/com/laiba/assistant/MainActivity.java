@@ -574,12 +574,18 @@ public class MainActivity extends Activity {
         return generator.generateKey();
     }
 
+
     private void saveApiKeySecurely(String apiKey) throws Exception {
+        if (apiKey == null || apiKey.trim().isEmpty()) {
+            throw new Exception("Invalid API key");
+        }
+
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(Cipher.ENCRYPT_MODE, getSafeEncryptionKey());
 
         byte[] encrypted = cipher.doFinal(
-            apiKey.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            apiKey.trim().getBytes(
+                java.nio.charset.StandardCharsets.UTF_8));
 
         File safeFolder = new File(getFilesDir(), "safe");
         if (!safeFolder.exists() && !safeFolder.mkdirs()) {
@@ -587,48 +593,68 @@ public class MainActivity extends Activity {
         }
 
         File keyFile = new File(safeFolder, "gemini.key");
-        try (FileOutputStream out = new FileOutputStream(keyFile)) {
+        android.util.AtomicFile atomicFile =
+            new android.util.AtomicFile(keyFile);
+
+        FileOutputStream out = null;
+        try {
+            out = atomicFile.startWrite();
             out.write(Base64.encode(cipher.getIV(), Base64.NO_WRAP));
             out.write('\n');
             out.write(Base64.encode(encrypted, Base64.NO_WRAP));
-            out.flush();
-            keyFile.setReadable(false, false);
-            keyFile.setWritable(false, false);
-            keyFile.setReadable(true, true);
-            keyFile.setWritable(true, true);
+            atomicFile.finishWrite(out);
+            out = null;
+        } catch (Exception error) {
+            if (out != null) atomicFile.failWrite(out);
+            throw error;
         }
     }
 
-
     private String loadApiKeySecurely() throws Exception {
-        File file = new File(new File(getFilesDir(), "safe"), "gemini.key");
-        if (!file.isFile()) return null;
+        File keyFile = new File(
+            new File(getFilesDir(), "safe"), "gemini.key");
 
-        java.io.BufferedReader reader = new java.io.BufferedReader(
-            new java.io.InputStreamReader(
-                new java.io.FileInputStream(file),
-                java.nio.charset.StandardCharsets.UTF_8));
+        if (!keyFile.isFile()) return null;
 
-        String ivLine;
-        String encryptedLine;
-        try {
-            ivLine = reader.readLine();
-            encryptedLine = reader.readLine();
-        } finally {
-            reader.close();
+        android.util.AtomicFile atomicFile =
+            new android.util.AtomicFile(keyFile);
+
+        try (java.io.BufferedReader reader =
+                new java.io.BufferedReader(
+                    new java.io.InputStreamReader(
+                        atomicFile.openRead(),
+                        java.nio.charset.StandardCharsets.UTF_8))) {
+
+            String ivLine = reader.readLine();
+            String encryptedLine = reader.readLine();
+
+            if (ivLine == null || encryptedLine == null ||
+                    reader.readLine() != null) {
+                throw new Exception("Secure key file is corrupted");
+            }
+
+            byte[] iv = Base64.decode(ivLine, Base64.NO_WRAP);
+            byte[] encrypted = Base64.decode(
+                encryptedLine, Base64.NO_WRAP);
+
+            if (iv.length != 12 || encrypted.length < 16) {
+                throw new Exception("Invalid encrypted key data");
+            }
+
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.DECRYPT_MODE, getSafeEncryptionKey(),
+                new GCMParameterSpec(128, iv));
+
+            String key = new String(
+                cipher.doFinal(encrypted),
+                java.nio.charset.StandardCharsets.UTF_8);
+
+            if (key.trim().isEmpty()) {
+                throw new Exception("Stored API key is empty");
+            }
+
+            return key;
         }
-
-        if (ivLine == null || encryptedLine == null) return null;
-
-        byte[] iv = Base64.decode(ivLine, Base64.NO_WRAP);
-        byte[] encrypted = Base64.decode(encryptedLine, Base64.NO_WRAP);
-
-        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-        cipher.init(Cipher.DECRYPT_MODE, getSafeEncryptionKey(),
-            new GCMParameterSpec(128, iv));
-
-        return new String(cipher.doFinal(encrypted),
-            java.nio.charset.StandardCharsets.UTF_8);
     }
 
     private void startStoredKeyCheck() {

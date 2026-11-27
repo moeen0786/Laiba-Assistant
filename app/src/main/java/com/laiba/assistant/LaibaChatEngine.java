@@ -39,10 +39,42 @@ public class LaibaChatEngine {
 
         public void cancel() {
             if (!cancelled.compareAndSet(false, true)) return;
-            HttpURLConnection active = connection;
+
+            HttpURLConnection active;
+            synchronized (this) {
+                active = connection;
+                connection = null;
+            }
+
             if (active != null) active.disconnect();
+
             Thread running = worker;
             if (running != null) running.interrupt();
+        }
+
+        private synchronized boolean attachConnection(
+                HttpURLConnection active) {
+            if (cancelled.get()) {
+                active.disconnect();
+                return false;
+            }
+
+            connection = active;
+
+            if (cancelled.get()) {
+                connection = null;
+                active.disconnect();
+                return false;
+            }
+
+            return true;
+        }
+
+        private synchronized void clearConnection(
+                HttpURLConnection active) {
+            if (connection == active) {
+                connection = null;
+            }
         }
 
         public boolean isCancelled() {
@@ -484,7 +516,10 @@ public class LaibaChatEngine {
 
         try {
             connection = (HttpURLConnection) new URL(endpoint).openConnection();
-            request.connection = connection;
+
+            if (!request.attachConnection(connection)) {
+                return;
+            }
 
             connection.setRequestMethod("POST");
             connection.setConnectTimeout(20000);
@@ -591,8 +626,10 @@ public class LaibaChatEngine {
             }
 
         } finally {
-            request.connection = null;
-            if (connection != null) connection.disconnect();
+            if (connection != null) {
+                request.clearConnection(connection);
+                connection.disconnect();
+            }
         }
     }
 

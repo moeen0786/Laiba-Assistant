@@ -19,6 +19,7 @@ public final class ApiRateLimitHandler {
 
     private static final long BASE_DELAY = 1000L;
     private static final long MAX_BACKOFF = 60000L;
+    private static final long MAX_SERVER_DELAY = 86400000L;
 
     private ApiRateLimitHandler() {}
 
@@ -96,7 +97,8 @@ public final class ApiRateLimitHandler {
                 ? serverDelay
                 : backoffDelay(attempt);
 
-        delay = Math.max(1000L, delay);
+        delay = Math.max(1000L,
+                Math.min(MAX_SERVER_DELAY, delay));
 
         persistCooldown(context, delay);
 
@@ -134,7 +136,9 @@ public final class ApiRateLimitHandler {
     }
 
     private static void persistCooldown(Context context, long delay) {
-        long until = System.currentTimeMillis() + delay;
+        long now = System.currentTimeMillis();
+        long until = delay > Long.MAX_VALUE - now
+                ? Long.MAX_VALUE : now + delay;
 
         synchronized (ApiRateLimitHandler.class) {
             long existing = prefs(context).getLong(COOLDOWN, 0L);
@@ -166,7 +170,11 @@ public final class ApiRateLimitHandler {
     public static boolean waitBeforeRetry(
             LaibaChatEngine.Request request, long delay) {
 
-        long deadline = System.currentTimeMillis() + delay;
+        long safeDelay = Math.max(0L,
+                Math.min(MAX_SERVER_DELAY, delay));
+        long now = System.currentTimeMillis();
+        long deadline = safeDelay > Long.MAX_VALUE - now
+                ? Long.MAX_VALUE : now + safeDelay;
 
         while (!request.isCancelled()) {
             long remaining = deadline - System.currentTimeMillis();
@@ -191,8 +199,10 @@ public final class ApiRateLimitHandler {
 
         try {
             double seconds = Double.parseDouble(input);
-            if (seconds >= 0) {
-                return (long) Math.ceil(seconds * 1000.0);
+            if (Double.isFinite(seconds) && seconds >= 0) {
+                return (long) Math.min(
+                        MAX_SERVER_DELAY,
+                        Math.ceil(seconds * 1000.0));
             }
         } catch (NumberFormatException ignored) {
         }
@@ -204,8 +214,10 @@ public final class ApiRateLimitHandler {
 
             Date date = format.parse(input);
             if (date != null) {
-                return Math.max(0,
-                        date.getTime() - System.currentTimeMillis());
+                long remaining = date.getTime()
+                        - System.currentTimeMillis();
+                return Math.max(0L,
+                        Math.min(MAX_SERVER_DELAY, remaining));
             }
         } catch (Exception ignored) {
         }
@@ -236,8 +248,9 @@ public final class ApiRateLimitHandler {
                 double seconds = Double.parseDouble(
                         duration.substring(0, duration.length() - 1));
 
-                return seconds >= 0
-                        ? (long) Math.ceil(seconds * 1000.0) : 0;
+                return Double.isFinite(seconds) && seconds >= 0
+                        ? (long) Math.min(MAX_SERVER_DELAY,
+                                Math.ceil(seconds * 1000.0)) : 0;
             }
         } catch (Exception ignored) {
         }
