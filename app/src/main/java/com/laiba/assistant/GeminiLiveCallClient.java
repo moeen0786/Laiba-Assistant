@@ -356,7 +356,7 @@ public final class GeminiLiveCallClient {
             startPlaybackWorker();
 
             microphoneThread = new Thread(() -> {
-                byte[] buffer = new byte[3200];
+                byte[] buffer = new byte[1280];
 
                 while (running.get()) {
                     if (muted.get()) {
@@ -370,6 +370,15 @@ public final class GeminiLiveCallClient {
                         AudioRecord.READ_BLOCKING
                     );
 
+                    if (count < 0) {
+                        if (running.get()) {
+                            callback.onError(
+                                "Microphone stream stopped. Please reconnect.");
+                            close();
+                        }
+                        break;
+                    }
+
                     if (count > 0 && running.get() && ready.get()) {
                         try {
                             JSONObject audio = new JSONObject();
@@ -378,12 +387,27 @@ public final class GeminiLiveCallClient {
                                 java.util.Arrays.copyOf(buffer, count),
                                 Base64.NO_WRAP));
 
-                            socket.send(new JSONObject()
-                                .put("realtimeInput",
-                                    new JSONObject().put("audio", audio))
-                                .toString());
-                        } catch (Exception ignored) {
-                            // Connection callbacks handle socket failures.
+                            boolean sent = socket != null && socket.send(
+                                new JSONObject()
+                                    .put("realtimeInput",
+                                        new JSONObject().put("audio", audio))
+                                    .toString());
+
+                            if (!sent) {
+                                if (running.get()) {
+                                    callback.onError(
+                                        "Gemini audio stream disconnected.");
+                                    close();
+                                }
+                                break;
+                            }
+                        } catch (Exception error) {
+                            if (running.get()) {
+                                callback.onError(
+                                    "Microphone streaming failed.");
+                                close();
+                            }
+                            break;
                         }
                     }
                 }
