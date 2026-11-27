@@ -114,8 +114,11 @@ public final class GeminiLiveCallClient {
                         WebSocket webSocket, int code, String reason) {
                     if (running.get()) {
                         ready.set(false);
-                        callback.onStatus(
-                            "Gemini Live disconnected (" + code + ").");
+                        callback.onError(
+                            "Gemini Live disconnected (" + code + "): " +
+                            (reason == null || reason.isEmpty()
+                                ? "Connection closed."
+                                : reason));
                     }
                     close();
                 }
@@ -173,6 +176,30 @@ public final class GeminiLiveCallClient {
     private void handleServerMessage(String raw) {
         try {
             JSONObject message = new JSONObject(raw);
+
+            JSONObject apiError = message.optJSONObject("error");
+            if (apiError != null) {
+                int code = apiError.optInt("code", 0);
+                String status = apiError.optString("status", "UNKNOWN");
+                String detail = apiError.optString(
+                    "message", "Unknown Gemini Live server error.");
+
+                callback.onError(
+                    "Gemini Live API error " + code +
+                    " (" + status + "): " + detail);
+
+                close();
+                return;
+            }
+
+            JSONObject goAway = message.optJSONObject("goAway");
+            if (goAway != null) {
+                String timeLeft = goAway.optString("timeLeft", "");
+                callback.onStatus(
+                    "Gemini Live session is ending. " +
+                    (timeLeft.isEmpty() ? "Please reconnect." :
+                        "Time left: " + timeLeft));
+            }
 
             if (message.has("setupComplete")) {
                 ready.set(true);
