@@ -90,11 +90,13 @@ public final class GeminiLiveCallClient {
 
         try {
             HttpUrl authenticatedEndpoint = HttpUrl.get(
-                ENDPOINT.replaceFirst("^wss://", "https://"));
+                ENDPOINT.replaceFirst("^wss://", "https://"))
+                .newBuilder()
+                .addQueryParameter("key", apiKey.trim())
+                .build();
 
             Request request = new Request.Builder()
                 .url(authenticatedEndpoint)
-                .addHeader("x-goog-api-key", apiKey.trim())
                 .build();
 
             callback.onStatus("Connecting to Gemini Live...");

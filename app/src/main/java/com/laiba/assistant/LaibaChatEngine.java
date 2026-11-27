@@ -452,7 +452,7 @@ public class LaibaChatEngine {
                 generationConfig.put("maxOutputTokens", 768);
 
                 JSONObject thinkingConfig = new JSONObject();
-                thinkingConfig.put("thinkingLevel", "minimal");
+                thinkingConfig.put("thinkingLevel", "LOW");
                 generationConfig.put("thinkingConfig", thinkingConfig);
                 body.put("generationConfig", generationConfig);
 
