@@ -296,7 +296,16 @@ public class LaibaChatEngine {
                 Exception lastError = null;
                 // Retry transient network/server failures, never duplicate a
                 // completed answer, and reset the live bubble before retrying.
-                for (int attempt = 0; attempt < 3; attempt++) {
+                // Respect a cooldown created by an earlier API request.
+                if (!ApiRateLimitHandler.waitForCooldown(app, request)) {
+                    if (request.isCancelled()) {
+                        removeLastMessage(app, "user", cleanMessage);
+                        handler.post(callback::onCancelled);
+                        return;
+                    }
+                }
+
+                for (int attempt = 0; attempt < 4; attempt++) {
                     if (request.isCancelled()) break;
 
                     raw.setLength(0);
@@ -315,17 +324,43 @@ public class LaibaChatEngine {
                         if (request.isCancelled()) break;
                         lastError = failure;
 
-                        if (attempt >= 2 || !isRetryable(failure)) break;
+                        long retryDelay;
+
+                        if (failure instanceof HttpFailure) {
+                            HttpFailure http = (HttpFailure) failure;
+
+                            ApiRateLimitHandler.Policy policy =
+                                    ApiRateLimitHandler.evaluate(
+                                            app, http.status,
+                                            http.responseBody,
+                                            http.retryAfter);
+
+                            if (!policy.retryable || attempt >= 3) {
+                                lastError = new Exception(policy.message);
+                                break;
+                            }
+
+                            retryDelay = policy.delayMillis;
+
+                        } else {
+                            if (attempt >= 3 || !isRetryable(failure)) break;
+                            retryDelay = ApiRateLimitHandler.backoffDelay(attempt);
+                        }
 
                         final int retryNumber = attempt + 1;
+                        final long waitSeconds = retryDelay / 1000L;
+
                         handler.post(() -> {
-                            if (!request.isCancelled()) callback.onStream("");
+                            if (!request.isCancelled()) {
+                                callback.onStream("");
+                            }
                         });
 
-                        try {
-                            Thread.sleep(700L * retryNumber);
-                        } catch (InterruptedException interrupted) {
-                            Thread.currentThread().interrupt();
+                        if (!ApiRateLimitHandler.waitBeforeRetry(
+                                request, retryDelay)) {
+                            if (request.isCancelled()) break;
+                            lastError = new Exception(
+                                    "Retry interrupted. Please try again.");
                             break;
                         }
                     }
@@ -451,7 +486,8 @@ public class LaibaChatEngine {
             int status = connection.getResponseCode();
             if (status < 200 || status >= 300) {
                 InputStream errorStream = connection.getErrorStream();
-                String detail = readStream(errorStream);
+                String responseBody = readStream(errorStream);
+                String detail = responseBody;
 
                 try {
                     JSONObject errorJson = new JSONObject(detail);
@@ -462,8 +498,11 @@ public class LaibaChatEngine {
                 } catch (Exception ignored) {
                 }
 
-                throw new HttpFailure(status,
-                        "Gemini API (" + status + "): " + detail);
+                throw new HttpFailure(
+                        status,
+                        "Gemini API (" + status + "): " + detail,
+                        responseBody,
+                        connection.getHeaderField("Retry-After"));
             }
 
             StringBuilder partialJsonReply = new StringBuilder();
@@ -537,10 +576,15 @@ public class LaibaChatEngine {
 
     private static final class HttpFailure extends IOException {
         final int status;
+        final String responseBody;
+        final String retryAfter;
 
-        HttpFailure(int status, String message) {
+        HttpFailure(int status, String message,
+                    String responseBody, String retryAfter) {
             super(message);
             this.status = status;
+            this.responseBody = responseBody;
+            this.retryAfter = retryAfter;
         }
     }
 
