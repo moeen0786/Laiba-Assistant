@@ -11,6 +11,8 @@ import android.text.style.StrikethroughSpan;
 import android.text.style.StyleSpan;
 import android.text.style.TypefaceSpan;
 import android.text.style.UnderlineSpan;
+import android.text.style.URLSpan;
+import android.net.Uri;
 
 public final class MarkdownRenderer {
 
@@ -211,6 +213,14 @@ public final class MarkdownRenderer {
                             start, out.length());
                     set(out, new UnderlineSpan(),
                             start, out.length());
+
+                    Uri parsedUrl = Uri.parse(url);
+                    String scheme = parsedUrl.getScheme();
+                    if (parsedUrl.getHost() != null
+                            && ("http".equalsIgnoreCase(scheme)
+                            || "https".equalsIgnoreCase(scheme))) {
+                        set(out, new URLSpan(url), start, out.length());
+                    }
 
                     i = closeUrl + 1;
                     continue;

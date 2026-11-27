@@ -2,6 +2,7 @@ package com.laiba.assistant;
 
 import android.content.Context;
 import android.view.Gravity;
+import android.text.method.LinkMovementMethod;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -110,6 +111,8 @@ public final class ChatMessageRenderer {
         text.setTextSize(14);
         text.setGravity(Gravity.LEFT | Gravity.TOP);
         text.setTextIsSelectable(true);
+        text.setMovementMethod(LinkMovementMethod.getInstance());
+        text.setLinksClickable(true);
         text.setLineSpacing(dp(context, 3), 1f);
 
         LinearLayout.LayoutParams params =
