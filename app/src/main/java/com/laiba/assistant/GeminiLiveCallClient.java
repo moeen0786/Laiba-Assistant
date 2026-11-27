@@ -113,7 +113,9 @@ public final class GeminiLiveCallClient {
                 public void onClosed(
                         WebSocket webSocket, int code, String reason) {
                     if (running.get()) {
-                        callback.onStatus("Call disconnected.");
+                        ready.set(false);
+                        callback.onStatus(
+                            "Gemini Live disconnected (" + code + ").");
                     }
                     close();
                 }
@@ -374,11 +376,7 @@ public final class GeminiLiveCallClient {
                         AudioRecord.READ_BLOCKING
                     );
 
-                    // Never transmit audio while muted or without audio focus.
-                    if (muted.get() || !audioFocusGranted) {
-                        continue;
-                    }
-
+                    // Check recorder failures before mute/focus filtering.
                     if (count < 0) {
                         if (running.get()) {
                             callback.onError(
@@ -388,8 +386,14 @@ public final class GeminiLiveCallClient {
                         break;
                     }
 
+                    // Discard audio captured while muted or without focus.
+                    if (muted.get() || !audioFocusGranted) {
+                        continue;
+                    }
+
                     if (count > 0 && running.get() && ready.get() &&
-                            !muted.get() && audioFocusGranted) {
+                            socket != null && !muted.get() &&
+                            audioFocusGranted) {
                         try {
                             JSONObject audio = new JSONObject();
                             audio.put("mimeType", "audio/pcm;rate=16000");
