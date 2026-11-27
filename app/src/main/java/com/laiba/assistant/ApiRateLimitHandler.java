@@ -111,11 +111,70 @@ public final class ApiRateLimitHandler {
                     + "Daily quota may still be available. "
                     + "Automatic retry was not performed.";
         } else {
-            message = "Gemini temporarily failed with HTTP "
-                    + status + ". Automatic retry was not performed.";
+            message = detailedProviderError(status, body);
         }
 
         return new Policy(true, false, delay, message);
+    }
+
+    private static String detailedProviderError(
+            int httpStatus, String responseBody) {
+
+        StringBuilder output = new StringBuilder();
+        output.append("Google API HTTP ").append(httpStatus);
+
+        try {
+            JSONObject root = new JSONObject(responseBody);
+            JSONObject error = root.optJSONObject("error");
+
+            if (error == null) {
+                output.append("\\nGoogle did not provide a structured error.");
+            } else {
+                String status = error.optString("status", "").trim();
+                String message = error.optString("message", "").trim();
+
+                if (!status.isEmpty()) {
+                    output.append("\\nStatus: ").append(status);
+                }
+
+                if (!message.isEmpty()) {
+                    output.append("\\nGoogle message: ").append(message);
+                }
+
+                JSONArray details = error.optJSONArray("details");
+                if (details != null) {
+                    for (int i = 0; i < details.length(); i++) {
+                        JSONObject detail = details.optJSONObject(i);
+                        if (detail == null) continue;
+
+                        String reason = detail.optString("reason", "").trim();
+                        String description =
+                                detail.optString("description", "").trim();
+                        String domain = detail.optString("domain", "").trim();
+
+                        if (!reason.isEmpty()) {
+                            output.append("\\nReason: ").append(reason);
+                        }
+                        if (!description.isEmpty()) {
+                            output.append("\\nDetails: ").append(description);
+                        }
+                        if (!domain.isEmpty()) {
+                            output.append("\\nDomain: ").append(domain);
+                        }
+                    }
+                }
+            }
+        } catch (Exception parseError) {
+            output.append("\\nGoogle response could not be parsed.");
+        }
+
+        output.append("\\nAutomatic retry was not performed.");
+
+        if (output.length() > 1000) {
+            return output.substring(0, 997) + "...";
+        }
+
+        return output.toString();
     }
 
     public static long backoffDelay(int attempt) {
