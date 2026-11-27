@@ -24,6 +24,7 @@ import java.util.concurrent.ExecutionException;
 public class LaibaChatEngine {
 
     private static final int MAX_API_ATTEMPTS = 5;
+    private static final boolean ENABLE_LOCAL_MEMORY_LOOKUP = false;
 
     private static final String PREFS = "laiba_chat_memory_v1";
     private static final String HISTORY_KEY = "history";
@@ -312,6 +313,8 @@ public class LaibaChatEngine {
                     return;
                 }
 
+                String localAnswer = null;
+                if (ENABLE_LOCAL_MEMORY_LOOKUP) {
                 // Search up to 500 chat messages and 300 saved memory facts.
                 // This scan runs on this worker, never on Android's UI thread.
                 long localSearchStarted =
@@ -325,7 +328,6 @@ public class LaibaChatEngine {
                 memoryThread.setDaemon(true);
                 memoryThread.start();
 
-                String localAnswer = null;
                 boolean memoryTimedOut = false;
 
                 try {
@@ -363,6 +365,8 @@ public class LaibaChatEngine {
                                 + " timed_out=" + memoryTimedOut
                                 + " history_limit=500 memory_limit=300"
                                 + " matched=" + (localAnswer != null));
+
+                }
 
                 if (request.isCancelled()) {
                     handler.post(callback::onCancelled);
