@@ -36,11 +36,10 @@ public final class GeminiLiveCallClient {
     }
 
     private static final String MODEL =
-        "gemini-3.8-live-extended-thinking";
+        GeminiApiConfig.LIVE_MODEL;
 
     private static final String ENDPOINT =
-        "wss://generativelanguage.googleapis.com/ws/" +
-        "google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent";
+        GeminiApiConfig.LIVE_WEBSOCKET_ENDPOINT;
 
     private final Callback callback;
     private final OkHttpClient http;
