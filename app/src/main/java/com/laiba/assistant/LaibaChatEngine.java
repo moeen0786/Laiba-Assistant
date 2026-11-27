@@ -632,6 +632,7 @@ public class LaibaChatEngine {
             JSONObject[] usageMetadata) throws Exception {
 
         HttpURLConnection connection = null;
+        String timeoutStage = "opening Google connection";
 
         try {
             connection = (HttpURLConnection) new URL(endpoint).openConnection();
@@ -642,7 +643,7 @@ public class LaibaChatEngine {
 
             connection.setRequestMethod("POST");
             connection.setConnectTimeout(15000);
-            connection.setReadTimeout(15000);
+            connection.setReadTimeout(120000);
             connection.setDoOutput(true);
             connection.setUseCaches(false);
             connection.setRequestProperty("Accept", "text/event-stream");
@@ -652,6 +653,7 @@ public class LaibaChatEngine {
             byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
             connection.setFixedLengthStreamingMode(payload.length);
 
+            timeoutStage = "sending request body to Google";
             try (OutputStream output = connection.getOutputStream()) {
                 output.write(payload);
                 output.flush();
@@ -659,8 +661,10 @@ public class LaibaChatEngine {
 
             if (request.isCancelled()) return;
 
+            timeoutStage = "waiting for Google's response headers";
             int status = connection.getResponseCode();
             if (status < 200 || status >= 300) {
+                timeoutStage = "reading Google's error response";
                 InputStream errorStream = connection.getErrorStream();
                 String responseBody = readStream(errorStream);
                 String detail = responseBody;
@@ -682,6 +686,7 @@ public class LaibaChatEngine {
             }
 
             StringBuilder partialJsonReply = new StringBuilder();
+            timeoutStage = "receiving Gemini streaming data";
 
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(
@@ -744,6 +749,13 @@ public class LaibaChatEngine {
                 throw new IOException("Gemini stream ended without response text.");
             }
 
+        } catch (SocketTimeoutException timeout) {
+            SocketTimeoutException detailed = new SocketTimeoutException(
+                    "Gemini timed out while " + timeoutStage
+                            + ". Connect timeout: 15 seconds; read timeout: 120 seconds. "
+                            + "Check internet connection or Google model response.");
+            detailed.initCause(timeout);
+            throw detailed;
         } finally {
             if (connection != null) {
                 request.clearConnection(connection);
