@@ -89,13 +89,12 @@ public final class GeminiLiveCallClient {
         errorReported = false;
 
         try {
-            HttpUrl authenticatedEndpoint = HttpUrl.get(ENDPOINT.replaceFirst("^wss://", "https://"))
-                .newBuilder()
-                .addQueryParameter("key", apiKey.trim())
-                .build();
+            HttpUrl authenticatedEndpoint = HttpUrl.get(
+                ENDPOINT.replaceFirst("^wss://", "https://"));
 
             Request request = new Request.Builder()
                 .url(authenticatedEndpoint)
+                .addHeader("x-goog-api-key", apiKey.trim())
                 .build();
 
             callback.onStatus("Connecting to Gemini Live...");
@@ -108,7 +107,7 @@ public final class GeminiLiveCallClient {
                         return;
                     }
                     mainHandler.removeCallbacks(setupTimeout);
-                    mainHandler.postDelayed(setupTimeout, 6000);
+                    mainHandler.postDelayed(setupTimeout, 20000);
                     callback.onStatus("Connected to server. Configuring Gemini...");
                     sendSetup();
                 }
