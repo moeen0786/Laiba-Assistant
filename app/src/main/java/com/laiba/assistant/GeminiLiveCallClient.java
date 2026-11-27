@@ -132,6 +132,23 @@ public final class GeminiLiveCallClient {
                                 .append(response.code())
                                 .append("): ")
                                 .append(response.message());
+
+                            try {
+                                if (response.body() != null) {
+                                    String serverDetail =
+                                        response.body().string();
+
+                                    if (serverDetail != null &&
+                                            !serverDetail.isEmpty()) {
+                                        if (serverDetail.length() > 1200) {
+                                            serverDetail =
+                                                serverDetail.substring(0, 1200);
+                                        }
+                                        detail.append(" | Server: ")
+                                            .append(serverDetail);
+                                    }
+                                }
+                            } catch (Exception ignored) {}
                         }
 
                         if (error.getMessage() != null &&
