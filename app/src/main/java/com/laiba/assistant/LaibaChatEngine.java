@@ -23,6 +23,9 @@ import java.util.concurrent.ExecutionException;
 
 public class LaibaChatEngine {
 
+    private static final int MAX_API_ATTEMPTS = 5;
+    private static final boolean ENABLE_LOCAL_MEMORY_LOOKUP = false;
+
     private static final String PREFS = "laiba_chat_memory_v1";
     private static final String HISTORY_KEY = "history";
     private static final String MEMORY_KEY = "memory";
@@ -310,6 +313,8 @@ public class LaibaChatEngine {
                     return;
                 }
 
+                String localAnswer = null;
+                if (ENABLE_LOCAL_MEMORY_LOOKUP) {
                 // Search up to 500 chat messages and 300 saved memory facts.
                 // This scan runs on this worker, never on Android's UI thread.
                 long localSearchStarted =
@@ -323,7 +328,6 @@ public class LaibaChatEngine {
                 memoryThread.setDaemon(true);
                 memoryThread.start();
 
-                String localAnswer = null;
                 boolean memoryTimedOut = false;
 
                 try {
@@ -362,6 +366,8 @@ public class LaibaChatEngine {
                                 + " history_limit=500 memory_limit=300"
                                 + " matched=" + (localAnswer != null));
 
+                }
+
                 if (request.isCancelled()) {
                     handler.post(callback::onCancelled);
                     return;
@@ -395,18 +401,18 @@ public class LaibaChatEngine {
 
                 String systemPrompt =
                         "You are Laiba, a helpful personal AI assistant. " +
-                        "Reply naturally in the language used by the user. " +
-                        "Answer the current user message accurately. " +
-                        "Do not assume access to previous conversations or " +
-                        "private saved memories. Do not invent personal facts. " +
-                        "Return ONLY valid JSON with exactly these fields: " +
+                        "Reply in the same language and script as the user's message: " +
+                        "Urdu script, Roman Urdu, or English. For mixed messages, " +
+                        "use the dominant language and preserve the user's writing style. " +
+                        "Do not switch scripts unless requested. Answer the current " +
+                        "message directly, accurately, and naturally. Do not invent " +
+                        "personal facts or claim access to unavailable chat history. " +
+                        "Return only valid JSON with exactly two fields: " +
                         "\"reply\" (string) and \"memories\" (array of strings). " +
-                        "The reply must answer the current user message. " +
-                        "The memories array should contain only useful, stable, " +
-                        "non-sensitive facts worth remembering for future chats. " +
-                        "Never save passwords, API keys, OTPs, financial secrets, " +
-                        "or sensitive personal information. " +
-                        "If there are no useful new memories, return an empty array.";
+                        "Save only useful, stable, non-sensitive facts. Never save " +
+                        "passwords, API keys, OTPs, financial secrets, or sensitive " +
+                        "personal information. If there is nothing useful to save, " +
+                        "return an empty memories array.";
 
                 // Only the new user message is included in Gemini contents.
                 JSONArray contents = buildContents(cleanMessage);
@@ -443,7 +449,7 @@ public class LaibaChatEngine {
                 responseSchema.put("required", required);
 
                 generationConfig.put("responseSchema", responseSchema);
-                generationConfig.put("maxOutputTokens", 1024);
+                generationConfig.put("maxOutputTokens", 768);
 
                 JSONObject thinkingConfig = new JSONObject();
                 thinkingConfig.put("thinkingLevel", "minimal");
@@ -452,14 +458,14 @@ public class LaibaChatEngine {
 
                 String endpoint =
                         "https://generativelanguage.googleapis.com/v1beta/models/" +
-                        "gemma-4-31b-it:streamGenerateContent?alt=sse";
+                        "gemini-3.8-flash:streamGenerateContent?alt=sse";
 
                 StringBuilder raw = new StringBuilder();
                 Exception lastError = null;
                 // Send the current question immediately.
                 // No pre-request cooldown wait or automatic retry.
 
-                for (int attempt = 0; attempt < 1; attempt++) {
+                for (int attempt = 0; attempt < MAX_API_ATTEMPTS; attempt++) {
                     if (request.isCancelled()) break;
 
                     raw.setLength(0);
@@ -508,7 +514,7 @@ public class LaibaChatEngine {
                                             http.retryAfter,
                                             attempt);
 
-                            if (!policy.retryable || attempt >= 0) {
+                            if (!policy.retryable || attempt >= MAX_API_ATTEMPTS - 1) {
                                 lastError = new Exception(policy.message);
                                 break;
                             }
@@ -516,7 +522,7 @@ public class LaibaChatEngine {
                             retryDelay = policy.delayMillis;
 
                         } else {
-                            if (attempt >= 0 || !isRetryable(failure)) break;
+                            if (attempt >= MAX_API_ATTEMPTS - 1 || !isRetryable(failure)) break;
                             retryDelay = ApiRateLimitHandler.backoffDelay(attempt);
                         }
 
@@ -577,12 +583,6 @@ public class LaibaChatEngine {
                     }
                 }
 
-                if (!usageRecorded) {
-                    TokenUsageManager.record(
-                            app, usageMetadata[0], true, attempts);
-                    usageRecorded = true;
-                }
-
                 // Persist only the completed assistant response.
                 addMessage(app, "model", finalReply);
                 final String completed = finalReply;
@@ -590,14 +590,20 @@ public class LaibaChatEngine {
                     if (!request.isCancelled()) callback.onReply(completed);
                 });
 
-            } catch (Exception failure) {
-                if (attempts > 0 && !usageRecorded) {
+                // Queue the visible reply first; usage bookkeeping stays on worker.
+                if (!usageRecorded) {
                     TokenUsageManager.record(
-                            app, usageMetadata[0], false, attempts);
+                            app, usageMetadata[0], true, attempts);
                     usageRecorded = true;
                 }
 
+            } catch (Exception failure) {
                 if (request.isCancelled()) {
+                    if (attempts > 0 && !usageRecorded) {
+                        TokenUsageManager.record(
+                                app, usageMetadata[0], false, attempts);
+                        usageRecorded = true;
+                    }
                     removeLastMessage(app, "user", cleanMessage);
                     handler.post(callback::onCancelled);
                     return;
@@ -610,6 +616,12 @@ public class LaibaChatEngine {
                 handler.post(() -> {
                     if (!request.isCancelled()) callback.onError(error);
                 });
+
+                if (attempts > 0 && !usageRecorded) {
+                    TokenUsageManager.record(
+                            app, usageMetadata[0], false, attempts);
+                    usageRecorded = true;
+                }
 
             } finally {
                 request.connection = null;
@@ -632,6 +644,7 @@ public class LaibaChatEngine {
             JSONObject[] usageMetadata) throws Exception {
 
         HttpURLConnection connection = null;
+        String timeoutStage = "opening Google connection";
 
         try {
             connection = (HttpURLConnection) new URL(endpoint).openConnection();
@@ -642,7 +655,7 @@ public class LaibaChatEngine {
 
             connection.setRequestMethod("POST");
             connection.setConnectTimeout(15000);
-            connection.setReadTimeout(15000);
+            connection.setReadTimeout(120000);
             connection.setDoOutput(true);
             connection.setUseCaches(false);
             connection.setRequestProperty("Accept", "text/event-stream");
@@ -652,6 +665,7 @@ public class LaibaChatEngine {
             byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
             connection.setFixedLengthStreamingMode(payload.length);
 
+            timeoutStage = "sending request body to Google";
             try (OutputStream output = connection.getOutputStream()) {
                 output.write(payload);
                 output.flush();
@@ -659,8 +673,10 @@ public class LaibaChatEngine {
 
             if (request.isCancelled()) return;
 
+            timeoutStage = "waiting for Google's response headers";
             int status = connection.getResponseCode();
             if (status < 200 || status >= 300) {
+                timeoutStage = "reading Google's error response";
                 InputStream errorStream = connection.getErrorStream();
                 String responseBody = readStream(errorStream);
                 String detail = responseBody;
@@ -682,6 +698,10 @@ public class LaibaChatEngine {
             }
 
             StringBuilder partialJsonReply = new StringBuilder();
+            long streamStartedAt = android.os.SystemClock.elapsedRealtime();
+            long firstChunkAt = 0L;
+            long lastStreamCallbackAt = 0L;
+            timeoutStage = "receiving Gemini streaming data";
 
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(
@@ -724,13 +744,23 @@ public class LaibaChatEngine {
                         if (part == null) continue;
 
                         String chunk = part.optString("text", "");
-                        if (!chunk.isEmpty()) raw.append(chunk);
+                        if (!chunk.isEmpty()) {
+                            raw.append(chunk);
+                            if (firstChunkAt == 0L) {
+                                firstChunkAt =
+                                        android.os.SystemClock.elapsedRealtime();
+                            }
+                        }
                     }
 
                     String visible = extractJsonStringField(raw.toString(), "reply");
-                    if (!visible.equals(partialJsonReply.toString())) {
+                    long now = android.os.SystemClock.elapsedRealtime();
+                    if (!visible.equals(partialJsonReply.toString())
+                            && (lastStreamCallbackAt == 0L
+                                || now - lastStreamCallbackAt >= 50L)) {
                         partialJsonReply.setLength(0);
                         partialJsonReply.append(visible);
+                        lastStreamCallbackAt = now;
 
                         final String snapshot = visible;
                         handler.post(() -> {
@@ -740,10 +770,24 @@ public class LaibaChatEngine {
                 }
             }
 
+            long streamFinishedAt =
+                    android.os.SystemClock.elapsedRealtime();
+            android.util.Log.i("LaibaGeminiTiming",
+                    "stream_ms=" + (streamFinishedAt - streamStartedAt)
+                    + " first_chunk_ms="
+                    + (firstChunkAt == 0L ? -1L : firstChunkAt - streamStartedAt));
+
             if (!request.isCancelled() && raw.length() == 0) {
                 throw new IOException("Gemini stream ended without response text.");
             }
 
+        } catch (SocketTimeoutException timeout) {
+            SocketTimeoutException detailed = new SocketTimeoutException(
+                    "Gemini timed out while " + timeoutStage
+                            + ". Connect timeout: 15 seconds; read timeout: 120 seconds. "
+                            + "Check internet connection or Google model response.");
+            detailed.initCause(timeout);
+            throw detailed;
         } finally {
             if (connection != null) {
                 request.clearConnection(connection);
@@ -805,7 +849,8 @@ public class LaibaChatEngine {
                     || code == 502 || code == 503 || code == 504;
         }
         return error instanceof SocketTimeoutException
-                || error instanceof IOException;
+                || error instanceof IOException
+                || error instanceof org.json.JSONException;
     }
 
     // Reads the "reply" JSON string while it is still being generated.

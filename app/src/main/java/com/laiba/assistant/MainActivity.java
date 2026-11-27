@@ -58,6 +58,9 @@ public class MainActivity extends Activity {
     private InternetConnectionManager internetConnectionManager;
     private TextView networkStatusBanner;
     private EditText chatInput;
+    private GeminiLiveCallClient liveCallClient;
+    private TextView callStatusText;
+    private TextView callMuteButton;
 
 
 
@@ -79,7 +82,14 @@ public class MainActivity extends Activity {
         internetConnectionManager.start(this::updateInternetStatus);
     }
 
+    @Override protected void onDestroy() {
+        stopLiveCall();
+        super.onDestroy();
+    }
+
     @Override protected void onStop() {
+        stopLiveCall();
+
         if (internetConnectionManager != null) {
             internetConnectionManager.stop();
         }
@@ -844,7 +854,8 @@ public class MainActivity extends Activity {
 
         page.addView(text("Laiba", 25, Color.WHITE, true));
         gap(page, dp(8));
-        page.addView(text("Voice", 14, 0xffaab8df, false));
+        callStatusText = text("Voice", 14, 0xffaab8df, false);
+        page.addView(callStatusText);
         gap(page, dp(20));
 
         CallOrbView callOrb = new CallOrbView();
@@ -858,6 +869,7 @@ public class MainActivity extends Activity {
         controls.setGravity(Gravity.CENTER);
 
         TextView mute = text("🎙", 25, Color.WHITE, true);
+        callMuteButton = mute;
         mute.setGravity(Gravity.CENTER);
         mute.setBackground(shape(0xff26334f, dp(34), dp(1), 0xff52658e));
         mute.setContentDescription("Mute microphone");
@@ -881,16 +893,152 @@ public class MainActivity extends Activity {
         View bottomSpace = new View(this);
         page.addView(bottomSpace, new LinearLayout.LayoutParams(1, 0, 0.25f));
 
-        final boolean[] muted = {false};
         mute.setOnClickListener(v -> {
-            muted[0] = !muted[0];
-            mute.setText(muted[0] ? "🔇" : "🎙");
+            if (liveCallClient == null) return;
+
+            boolean next = !liveCallClient.isMuted();
+            liveCallClient.setMuted(next);
+            mute.setText(next ? "🔇" : "🎙");
             mute.setBackground(shape(
-                muted[0] ? 0xff48516a : 0xff26334f,
-                dp(34), dp(1), muted[0] ? 0xffaab8df : 0xff52658e));
+                next ? 0xff48516a : 0xff26334f,
+                dp(34), dp(1), next ? 0xffaab8df : 0xff52658e));
         });
 
-        close.setOnClickListener(v -> showChat());
+        close.setOnClickListener(v -> {
+            stopLiveCall();
+            showChat();
+        });
+
+        startLiveCall();
+    }
+
+
+    private void startLiveCall() {
+        if (android.os.Build.VERSION.SDK_INT >= 23 &&
+                checkSelfPermission(
+                    android.Manifest.permission.RECORD_AUDIO) !=
+                    android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                new String[]{android.Manifest.permission.RECORD_AUDIO},
+                7314);
+            if (callStatusText != null) {
+                callStatusText.setText("Microphone permission required");
+            }
+            return;
+        }
+
+        connectGeminiLiveCall();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(
+            int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(
+            requestCode, permissions, grantResults);
+
+        if (requestCode != 7314) return;
+
+        if (grantResults.length > 0 &&
+                grantResults[0] ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            connectGeminiLiveCall();
+        } else {
+            if (callStatusText != null) {
+                callStatusText.setText("Microphone permission denied");
+            }
+            android.widget.Toast.makeText(
+                this, "Call Mode requires microphone permission.",
+                android.widget.Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void connectGeminiLiveCall() {
+        if (liveCallClient != null) return;
+
+        if (!hasInternetConnection()) {
+            if (callStatusText != null) {
+                callStatusText.setText("Internet connection required");
+            }
+            return;
+        }
+
+        if (callStatusText != null) {
+            callStatusText.setText("Loading secure Gemini API key...");
+        }
+
+        new Thread(() -> {
+            try {
+                String apiKey = loadApiKeySecurely();
+                if (apiKey == null || apiKey.trim().isEmpty()) {
+                    runOnUiThread(() -> {
+                        if (callStatusText != null) {
+                            callStatusText.setText("Gemini API key not found");
+                        }
+                    });
+                    return;
+                }
+
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+
+                    GeminiLiveCallClient client =
+                        new GeminiLiveCallClient(
+                            new GeminiLiveCallClient.Callback() {
+                                @Override public void onStatus(String status) {
+                                    runOnUiThread(() -> {
+                                        if (callStatusText != null) {
+                                            callStatusText.setText(status);
+                                        }
+                                    });
+                                }
+
+                                @Override public void onTranscript(
+                                        String text, boolean fromLaiba) {
+                                    runOnUiThread(() -> {
+                                        if (callStatusText != null) {
+                                            callStatusText.setText(
+                                                (fromLaiba ? "Laiba: " : "You: ")
+                                                    + text);
+                                        }
+                                    });
+                                }
+
+                                @Override public void onError(String error) {
+                                    runOnUiThread(() -> {
+                                        if (callStatusText != null) {
+                                            callStatusText.setText(error);
+                                        }
+                                        stopLiveCall();
+                                    });
+                                }
+                            });
+
+                    client.setContext(getApplicationContext());
+                    liveCallClient = client;
+                    client.start(apiKey);
+                });
+
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    if (callStatusText != null) {
+                        callStatusText.setText(
+                            "Could not load secure Gemini API key");
+                    }
+                });
+            }
+        }, "Laiba-Live-Key-Loader").start();
+    }
+
+    private void stopLiveCall() {
+        GeminiLiveCallClient client = liveCallClient;
+        liveCallClient = null;
+
+        if (client != null) {
+            client.close();
+        }
+
+        callMuteButton = null;
+        callStatusText = null;
     }
 
     private class CallOrbView extends View {
@@ -1719,6 +1867,12 @@ public class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
+        if (liveCallClient != null) {
+            stopLiveCall();
+            showChat();
+            return;
+        }
+
         if (menuState == 2) {
             showMenu();
         } else if (menuState == 1) {
