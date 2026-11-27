@@ -56,7 +56,7 @@ public final class GeminiLiveCallClient {
     private AudioFocusRequest focusRequest;
     private AudioManager audioManager;
     private AudioManager.OnAudioFocusChangeListener focusListener;
-    private boolean audioFocusGranted = false;
+    private volatile boolean audioFocusGranted = false;
 
     public GeminiLiveCallClient(Callback callback) {
         this.callback = callback;
@@ -304,9 +304,19 @@ public final class GeminiLiveCallClient {
 
             focusListener = change -> {
                 if (change == AudioManager.AUDIOFOCUS_LOSS) {
+                    audioFocusGranted = false;
                     close();
-                } else if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                } else if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT ||
+                           change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK) {
+                    audioFocusGranted = false;
                     stopPlayback();
+                    callback.onStatus("Audio temporarily paused...");
+                } else if (change == AudioManager.AUDIOFOCUS_GAIN) {
+                    audioFocusGranted = true;
+                    if (running.get()) {
+                        callback.onStatus(
+                            muted.get() ? "Microphone muted." : "Listening...");
+                    }
                 }
             };
 
@@ -358,16 +368,13 @@ public final class GeminiLiveCallClient {
                     AudioRecord currentRecorder = recorder;
                     if (currentRecorder == null) break;
 
-                    boolean currentlyMuted = muted.get();
-
                     int count = currentRecorder.read(
                         buffer, 0, buffer.length,
                         AudioRecord.READ_BLOCKING
                     );
 
-                    // Discard captured audio while muted so stale speech
-                    // is never transmitted after unmuting.
-                    if (currentlyMuted) {
+                    // Never transmit audio while muted or without audio focus.
+                    if (muted.get() || !audioFocusGranted) {
                         continue;
                     }
 
@@ -380,7 +387,8 @@ public final class GeminiLiveCallClient {
                         break;
                     }
 
-                    if (count > 0 && running.get() && ready.get()) {
+                    if (count > 0 && running.get() && ready.get() &&
+                            !muted.get() && audioFocusGranted) {
                         try {
                             JSONObject audio = new JSONObject();
                             audio.put("mimeType", "audio/pcm;rate=16000");
@@ -454,7 +462,8 @@ public final class GeminiLiveCallClient {
     }
 
     private void playAudio(byte[] pcm) {
-        if (!running.get() || player == null || pcm.length == 0) return;
+        if (!running.get() || !audioFocusGranted ||
+                player == null || pcm.length == 0) return;
 
         // Keep memory bounded if the network delivers audio faster than playback.
         if (playbackQueue.size() > 40) {
