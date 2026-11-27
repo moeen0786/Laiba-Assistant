@@ -124,11 +124,22 @@ public final class GeminiLiveCallClient {
                         Throwable error,
                         Response response) {
                     if (running.get()) {
-                        reportError(
-                            error.getMessage() == null
-                                ? "Gemini Live connection failed."
-                                : error.getMessage()
-                        );
+                        StringBuilder detail = new StringBuilder(
+                            "Gemini Live connection failed");
+
+                        if (response != null) {
+                            detail.append(" (HTTP ")
+                                .append(response.code())
+                                .append("): ")
+                                .append(response.message());
+                        }
+
+                        if (error.getMessage() != null &&
+                                !error.getMessage().isEmpty()) {
+                            detail.append(" — ").append(error.getMessage());
+                        }
+
+                        reportError(detail.toString());
                     }
                     close();
                 }
