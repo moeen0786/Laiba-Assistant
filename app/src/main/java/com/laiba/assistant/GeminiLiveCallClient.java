@@ -12,6 +12,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Base64;
 
+import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -88,9 +89,13 @@ public final class GeminiLiveCallClient {
         errorReported = false;
 
         try {
+            HttpUrl authenticatedEndpoint = HttpUrl.get(ENDPOINT)
+                .newBuilder()
+                .addQueryParameter("key", apiKey.trim())
+                .build();
+
             Request request = new Request.Builder()
-                .url(ENDPOINT)
-                .header("x-goog-api-key", apiKey.trim())
+                .url(authenticatedEndpoint)
                 .build();
 
             callback.onStatus("Connecting to Gemini Live...");
