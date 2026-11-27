@@ -62,11 +62,28 @@ public final class GeminiLiveCallClient {
     private AudioManager.OnAudioFocusChangeListener focusListener;
     private volatile boolean audioFocusGranted = false;
     private volatile boolean errorReported = false;
+    private volatile String lastServerMessage = "No server response received.";
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
     private final Runnable setupTimeout = () -> {
         if (running.get() && !ready.get()) {
-            reportError(
-                "Gemini Live setup timed out. Check API key, model access and connection.");
+            String last = lastServerMessage;
+            if (last.length() > 900) {
+                last = last.substring(0, 900);
+            }
+
+            String diagnostic =
+                "GEMINI LIVE SETUP DIAGNOSTIC" +
+                "\\nModel: " + MODEL +
+                "\\nAPI: v1alpha" +
+                "\\nStage: WebSocket connected, setupComplete missing" +
+                "\\nSocket: " +
+                (socket == null ? "Unavailable" : "Still connected") +
+                "\\nLast server response: " + last +
+                "\\nPossible causes: model access, unsupported setup " +
+                "configuration, API key/project eligibility, or server delay.";
+
+            reportError(diagnostic);
             close();
         }
     };
@@ -104,6 +121,7 @@ public final class GeminiLiveCallClient {
             socket = http.newWebSocket(request, new WebSocketListener() {
                 @Override
                 public void onOpen(WebSocket webSocket, Response response) {
+                    lastServerMessage = "WebSocket opened; waiting for Gemini setup response.";
                     if (!running.get()) {
                         webSocket.close(1000, "Call already ended");
                         return;
@@ -116,6 +134,7 @@ public final class GeminiLiveCallClient {
 
                 @Override
                 public void onMessage(WebSocket webSocket, String message) {
+                    lastServerMessage = message;
                     handleServerMessage(message);
                 }
 
@@ -194,6 +213,7 @@ public final class GeminiLiveCallClient {
     private void sendSetup() {
         try {
             JSONObject setup = new JSONObject();
+            lastServerMessage = "Setup request sent for models/" + MODEL;
             setup.put("model", "models/" + MODEL);
 
             JSONObject generation = new JSONObject();
