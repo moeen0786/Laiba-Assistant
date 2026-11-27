@@ -108,7 +108,7 @@ public final class GeminiLiveCallClient {
                         return;
                     }
                     mainHandler.removeCallbacks(setupTimeout);
-                    mainHandler.postDelayed(setupTimeout, 10000);
+                    mainHandler.postDelayed(setupTimeout, 6000);
                     callback.onStatus("Connected to server. Configuring Gemini...");
                     sendSetup();
                 }
@@ -256,6 +256,15 @@ public final class GeminiLiveCallClient {
 
                 close();
                 return;
+            }
+
+            if (!ready.get() && !message.has("setupComplete")) {
+                String diagnostic = raw.length() > 700
+                    ? raw.substring(0, 700)
+                    : raw;
+
+                callback.onStatus(
+                    "Gemini setup response: " + diagnostic);
             }
 
             JSONObject goAway = message.optJSONObject("goAway");
