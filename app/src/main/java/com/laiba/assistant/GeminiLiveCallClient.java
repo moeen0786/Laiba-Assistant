@@ -8,8 +8,11 @@ import android.media.AudioManager;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Base64;
 
+import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -21,7 +24,7 @@ import org.json.JSONObject;
 
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class GeminiLiveCallClient {
@@ -46,7 +49,8 @@ public final class GeminiLiveCallClient {
     private final AtomicBoolean ready = new AtomicBoolean(false);
     private final AtomicBoolean playbackRunning = new AtomicBoolean(false);
     private final BlockingQueue<byte[]> playbackQueue =
-        new LinkedBlockingQueue<>();
+        new ArrayBlockingQueue<>(40);
+    private final Object playbackLock = new Object();
     private Thread playbackThread;
 
     private WebSocket socket;
@@ -56,7 +60,16 @@ public final class GeminiLiveCallClient {
     private AudioFocusRequest focusRequest;
     private AudioManager audioManager;
     private AudioManager.OnAudioFocusChangeListener focusListener;
-    private boolean audioFocusGranted = false;
+    private volatile boolean audioFocusGranted = false;
+    private volatile boolean errorReported = false;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Runnable setupTimeout = () -> {
+        if (running.get() && !ready.get()) {
+            reportError(
+                "Gemini Live setup timed out. Check API key, model access and connection.");
+            close();
+        }
+    };
 
     public GeminiLiveCallClient(Callback callback) {
         this.callback = callback;
@@ -68,16 +81,20 @@ public final class GeminiLiveCallClient {
 
     public void start(String apiKey) {
         if (apiKey == null || apiKey.trim().isEmpty()) {
-            callback.onError("Gemini API key is missing.");
+            reportError("Gemini API key is missing.");
             return;
         }
 
         if (!running.compareAndSet(false, true)) return;
+        errorReported = false;
 
         try {
+            HttpUrl authenticatedEndpoint = HttpUrl.get(
+                ENDPOINT.replaceFirst("^wss://", "https://"));
+
             Request request = new Request.Builder()
-                .url(ENDPOINT)
-                .header("x-goog-api-key", apiKey.trim())
+                .url(authenticatedEndpoint)
+                .addHeader("x-goog-api-key", apiKey.trim())
                 .build();
 
             callback.onStatus("Connecting to Gemini Live...");
@@ -85,6 +102,13 @@ public final class GeminiLiveCallClient {
             socket = http.newWebSocket(request, new WebSocketListener() {
                 @Override
                 public void onOpen(WebSocket webSocket, Response response) {
+                    if (!running.get()) {
+                        webSocket.close(1000, "Call already ended");
+                        return;
+                    }
+                    mainHandler.removeCallbacks(setupTimeout);
+                    mainHandler.postDelayed(setupTimeout, 20000);
+                    callback.onStatus("Connected to server. Configuring Gemini...");
                     sendSetup();
                 }
 
@@ -99,11 +123,39 @@ public final class GeminiLiveCallClient {
                         Throwable error,
                         Response response) {
                     if (running.get()) {
-                        callback.onError(
-                            error.getMessage() == null
-                                ? "Gemini Live connection failed."
-                                : error.getMessage()
-                        );
+                        StringBuilder detail = new StringBuilder(
+                            "Gemini Live connection failed");
+
+                        if (response != null) {
+                            detail.append(" (HTTP ")
+                                .append(response.code())
+                                .append("): ")
+                                .append(response.message());
+
+                            try {
+                                if (response.body() != null) {
+                                    String serverDetail =
+                                        response.body().string();
+
+                                    if (serverDetail != null &&
+                                            !serverDetail.isEmpty()) {
+                                        if (serverDetail.length() > 1200) {
+                                            serverDetail =
+                                                serverDetail.substring(0, 1200);
+                                        }
+                                        detail.append(" | Server: ")
+                                            .append(serverDetail);
+                                    }
+                                }
+                            } catch (Exception ignored) {}
+                        }
+
+                        if (error.getMessage() != null &&
+                                !error.getMessage().isEmpty()) {
+                            detail.append(" — ").append(error.getMessage());
+                        }
+
+                        reportError(detail.toString());
                     }
                     close();
                 }
@@ -112,15 +164,28 @@ public final class GeminiLiveCallClient {
                 public void onClosed(
                         WebSocket webSocket, int code, String reason) {
                     if (running.get()) {
-                        callback.onStatus("Call disconnected.");
+                        ready.set(false);
+                        reportError(
+                            "Gemini Live disconnected (" + code + "): " +
+                            (reason == null || reason.isEmpty()
+                                ? "Connection closed."
+                                : reason));
                     }
                     close();
                 }
             });
 
         } catch (Exception error) {
+            String detail = error.getMessage();
+
             close();
-            callback.onError("Could not start Gemini Live.");
+
+            reportError(
+                "Could not start Gemini Live: " +
+                (detail == null || detail.trim().isEmpty()
+                    ? error.getClass().getSimpleName()
+                    : detail)
+            );
         }
     }
 
@@ -158,11 +223,17 @@ public final class GeminiLiveCallClient {
             realtime.put("activityHandling", "START_OF_ACTIVITY_INTERRUPTS");
             setup.put("realtimeInputConfig", realtime);
 
-            socket.send(new JSONObject()
-                .put("setup", setup).toString());
+            if (socket == null || !socket.send(
+                    new JSONObject().put("setup", setup).toString())) {
+                throw new IllegalStateException(
+                    "Gemini setup message could not be sent.");
+            }
 
         } catch (Exception error) {
-            callback.onError("Gemini Live setup failed.");
+            reportError("Gemini Live setup failed: " +
+                (error.getMessage() == null
+                    ? error.getClass().getSimpleName()
+                    : error.getMessage()));
             close();
         }
     }
@@ -171,11 +242,54 @@ public final class GeminiLiveCallClient {
         try {
             JSONObject message = new JSONObject(raw);
 
+            JSONObject apiError = message.optJSONObject("error");
+            if (apiError != null) {
+                int code = apiError.optInt("code", 0);
+                String status = apiError.optString("status", "UNKNOWN");
+                String detail = apiError.optString(
+                    "message", "Unknown Gemini Live server error.");
+
+                reportError(
+                    "Gemini Live API error " + code +
+                    " (" + status + "): " + detail);
+
+                close();
+                return;
+            }
+
+            if (!ready.get() && !message.has("setupComplete")) {
+                String diagnostic = raw.length() > 700
+                    ? raw.substring(0, 700)
+                    : raw;
+
+                callback.onStatus(
+                    "Gemini setup response: " + diagnostic);
+            }
+
+            JSONObject goAway = message.optJSONObject("goAway");
+            if (goAway != null) {
+                String timeLeft = goAway.optString("timeLeft", "");
+                callback.onStatus(
+                    "Gemini Live session is ending. " +
+                    (timeLeft.isEmpty() ? "Please reconnect." :
+                        "Time left: " + timeLeft));
+            }
+
             if (message.has("setupComplete")) {
+                mainHandler.removeCallbacks(setupTimeout);
                 ready.set(true);
                 callback.onStatus("Connected. Laiba is listening.");
                 startAudio();
                 return;
+            }
+
+            // Read top-level interaction status independently of serverContent.
+            String status = message.optString("interactionStatus", "");
+
+            if ("IN_PROGRESS".equals(status)) {
+                callback.onStatus("Laiba is thinking...");
+            } else if ("IDLE".equals(status)) {
+                callback.onStatus("Listening...");
             }
 
             JSONObject server = message.optJSONObject("serverContent");
@@ -216,17 +330,9 @@ public final class GeminiLiveCallClient {
                 }
             }
 
-            String status = server.optString("interactionStatus", "");
-
-            if ("IN_PROGRESS".equals(status)) {
-                callback.onStatus("Laiba is thinking...");
-            } else if ("IDLE".equals(status)) {
-                callback.onStatus("Listening...");
-            }
-
         } catch (Exception error) {
             if (running.get()) {
-                callback.onError("Could not process Gemini Live response.");
+                reportError("Could not process Gemini Live response.");
             }
         }
     }
@@ -304,9 +410,26 @@ public final class GeminiLiveCallClient {
 
             focusListener = change -> {
                 if (change == AudioManager.AUDIOFOCUS_LOSS) {
+                    audioFocusGranted = false;
                     close();
-                } else if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                } else if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT ||
+                           change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK) {
+                    audioFocusGranted = false;
                     stopPlayback();
+                    callback.onStatus("Audio temporarily paused...");
+                } else if (change == AudioManager.AUDIOFOCUS_GAIN) {
+                    audioFocusGranted = true;
+                    synchronized (playbackLock) {
+                        if (running.get() && player != null) {
+                            try {
+                                player.play();
+                            } catch (Exception ignored) {}
+                        }
+                    }
+                    if (running.get()) {
+                        callback.onStatus(
+                            muted.get() ? "Microphone muted." : "Listening...");
+                    }
                 }
             };
 
@@ -358,29 +481,29 @@ public final class GeminiLiveCallClient {
                     AudioRecord currentRecorder = recorder;
                     if (currentRecorder == null) break;
 
-                    boolean currentlyMuted = muted.get();
-
                     int count = currentRecorder.read(
                         buffer, 0, buffer.length,
                         AudioRecord.READ_BLOCKING
                     );
 
-                    // Discard captured audio while muted so stale speech
-                    // is never transmitted after unmuting.
-                    if (currentlyMuted) {
-                        continue;
-                    }
-
+                    // Check recorder failures before mute/focus filtering.
                     if (count < 0) {
                         if (running.get()) {
-                            callback.onError(
+                            reportError(
                                 "Microphone stream stopped. Please reconnect.");
                             close();
                         }
                         break;
                     }
 
-                    if (count > 0 && running.get() && ready.get()) {
+                    // Discard audio captured while muted or without focus.
+                    if (muted.get() || !audioFocusGranted) {
+                        continue;
+                    }
+
+                    if (count > 0 && running.get() && ready.get() &&
+                            socket != null && !muted.get() &&
+                            audioFocusGranted) {
                         try {
                             JSONObject audio = new JSONObject();
                             audio.put("mimeType", "audio/pcm;rate=16000");
@@ -396,7 +519,7 @@ public final class GeminiLiveCallClient {
 
                             if (!sent) {
                                 if (running.get()) {
-                                    callback.onError(
+                                    reportError(
                                         "Gemini audio stream disconnected.");
                                     close();
                                 }
@@ -404,7 +527,7 @@ public final class GeminiLiveCallClient {
                             }
                         } catch (Exception error) {
                             if (running.get()) {
-                                callback.onError(
+                                reportError(
                                     "Microphone streaming failed.");
                                 close();
                             }
@@ -417,7 +540,7 @@ public final class GeminiLiveCallClient {
             microphoneThread.start();
 
         } catch (Exception error) {
-            callback.onError("Microphone/audio initialization failed: " +
+            reportError("Microphone/audio initialization failed: " +
                 error.getMessage());
             close();
         }
@@ -438,9 +561,16 @@ public final class GeminiLiveCallClient {
                 try {
                     byte[] pcm = playbackQueue.take();
                     AudioTrack current = player;
-                    if (current != null && running.get()) {
-                        current.write(
-                            pcm, 0, pcm.length, AudioTrack.WRITE_BLOCKING);
+                    if (current != null && running.get() &&
+                            audioFocusGranted) {
+                        synchronized (playbackLock) {
+                            if (running.get() && audioFocusGranted &&
+                                    current == player) {
+                                current.write(
+                                    pcm, 0, pcm.length,
+                                    AudioTrack.WRITE_BLOCKING);
+                            }
+                        }
                     }
                 } catch (InterruptedException interrupted) {
                     break;
@@ -454,24 +584,29 @@ public final class GeminiLiveCallClient {
     }
 
     private void playAudio(byte[] pcm) {
-        if (!running.get() || player == null || pcm.length == 0) return;
+        if (!running.get() || !audioFocusGranted ||
+                player == null || pcm.length == 0) return;
 
-        // Keep memory bounded if the network delivers audio faster than playback.
-        if (playbackQueue.size() > 40) {
+        // Drop oldest audio when the bounded playback queue is full.
+        if (!playbackQueue.offer(pcm)) {
             playbackQueue.poll();
+            playbackQueue.offer(pcm);
         }
-        playbackQueue.offer(pcm);
     }
 
     private synchronized void stopPlayback() {
         playbackQueue.clear();
 
-        if (player != null) {
-            try {
-                player.pause();
-                player.flush();
-                player.play();
-            } catch (Exception ignored) {}
+        synchronized (playbackLock) {
+            if (player != null) {
+                try {
+                    player.pause();
+                    player.flush();
+                    if (running.get() && audioFocusGranted) {
+                        player.play();
+                    }
+                } catch (Exception ignored) {}
+            }
         }
     }
 
@@ -484,10 +619,16 @@ public final class GeminiLiveCallClient {
         return muted.get();
     }
 
+    private void reportError(String message) {
+        errorReported = true;
+        callback.onError(message);
+    }
+
     public void close() {
         if (!running.getAndSet(false)) return;
 
         ready.set(false);
+        mainHandler.removeCallbacks(setupTimeout);
 
         if (microphoneThread != null) {
             microphoneThread.interrupt();
@@ -537,6 +678,8 @@ public final class GeminiLiveCallClient {
             audioManager = null;
         }
 
-        callback.onStatus("Call ended.");
+        if (!errorReported) {
+            callback.onStatus("Call ended.");
+        }
     }
 }
