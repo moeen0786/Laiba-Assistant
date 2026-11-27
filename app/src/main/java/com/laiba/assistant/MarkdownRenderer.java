@@ -188,9 +188,9 @@ public final class MarkdownRenderer {
 
         while (i < value.length()) {
 
-            if (value.charAt(i) == '\\\\'
+            if (value.charAt(i) == '\\'
                     && i + 1 < value.length()
-                    && "*_~`\\\\[]".indexOf(value.charAt(i + 1)) >= 0) {
+                    && "*_~`\\[]".indexOf(value.charAt(i + 1)) >= 0) {
                 out.append(value.charAt(i + 1));
                 i += 2;
                 continue;
