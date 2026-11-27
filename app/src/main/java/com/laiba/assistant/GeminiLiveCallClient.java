@@ -40,7 +40,7 @@ public final class GeminiLiveCallClient {
 
     private static final String ENDPOINT =
         "wss://generativelanguage.googleapis.com/ws/" +
-        "google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent";
+        "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 
     private final Callback callback;
     private final OkHttpClient http;
@@ -108,7 +108,7 @@ public final class GeminiLiveCallClient {
                         return;
                     }
                     mainHandler.removeCallbacks(setupTimeout);
-                    mainHandler.postDelayed(setupTimeout, 20000);
+                    mainHandler.postDelayed(setupTimeout, 10000);
                     callback.onStatus("Connected to server. Configuring Gemini...");
                     sendSetup();
                 }
@@ -231,7 +231,10 @@ public final class GeminiLiveCallClient {
             }
 
         } catch (Exception error) {
-            reportError("Gemini Live setup failed.");
+            reportError("Gemini Live setup failed: " +
+                (error.getMessage() == null
+                    ? error.getClass().getSimpleName()
+                    : error.getMessage()));
             close();
         }
     }
