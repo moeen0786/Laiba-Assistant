@@ -23,7 +23,7 @@ import java.util.concurrent.ExecutionException;
 
 public class LaibaChatEngine {
 
-    private static final int MAX_API_ATTEMPTS = 5;
+    private static final int MAX_API_ATTEMPTS = 1;
     private static final boolean ENABLE_LOCAL_MEMORY_LOOKUP = false;
 
     private static final String PREFS = "laiba_chat_memory_v1";
@@ -452,13 +452,11 @@ public class LaibaChatEngine {
                 generationConfig.put("maxOutputTokens", 768);
 
                 JSONObject thinkingConfig = new JSONObject();
-                thinkingConfig.put("thinkingLevel", "minimal");
+                thinkingConfig.put("thinkingLevel", "LOW");
                 generationConfig.put("thinkingConfig", thinkingConfig);
                 body.put("generationConfig", generationConfig);
 
-                String endpoint =
-                        "https://generativelanguage.googleapis.com/v1beta/models/" +
-                        "gemini-3.8-flash:streamGenerateContent?alt=sse";
+                String endpoint = GeminiApiConfig.CHAT_ENDPOINT;
 
                 StringBuilder raw = new StringBuilder();
                 Exception lastError = null;
