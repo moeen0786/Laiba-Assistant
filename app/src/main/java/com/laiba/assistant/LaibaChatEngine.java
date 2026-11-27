@@ -291,6 +291,9 @@ public class LaibaChatEngine {
 
                 StringBuilder raw = new StringBuilder();
                 Exception lastError = null;
+                JSONObject[] usageMetadata = new JSONObject[1];
+                int attempts = 0;
+                boolean usageRecorded = false;
 
                 // Retry transient network/server failures, never duplicate a
                 // completed answer, and reset the live bubble before retrying.
@@ -298,11 +301,13 @@ public class LaibaChatEngine {
                     if (request.isCancelled()) break;
 
                     raw.setLength(0);
+                    usageMetadata[0] = null;
+                    attempts = attempt + 1;
 
                     try {
                         streamAttempt(
                                 endpoint, apiKey.trim(), body, request, raw,
-                                handler, callback);
+                                handler, callback, usageMetadata);
 
                         lastError = null;
                         break;
@@ -328,6 +333,11 @@ public class LaibaChatEngine {
                 }
 
                 if (request.isCancelled()) {
+                    if (attempts > 0 && !usageRecorded) {
+                        TokenUsageManager.record(
+                                app, usageMetadata[0], false, attempts);
+                        usageRecorded = true;
+                    }
                     removeLastMessage(app, "user", cleanMessage);
                     handler.post(callback::onCancelled);
                     return;
@@ -360,6 +370,12 @@ public class LaibaChatEngine {
                     return;
                 }
 
+                if (!usageRecorded) {
+                    TokenUsageManager.record(
+                            app, usageMetadata[0], true, attempts);
+                    usageRecorded = true;
+                }
+
                 // Persist only the completed assistant response.
                 addMessage(app, "model", finalReply);
                 final String completed = finalReply;
@@ -368,6 +384,12 @@ public class LaibaChatEngine {
                 });
 
             } catch (Exception failure) {
+                if (attempts > 0 && !usageRecorded) {
+                    TokenUsageManager.record(
+                            app, usageMetadata[0], false, attempts);
+                    usageRecorded = true;
+                }
+
                 if (request.isCancelled()) {
                     removeLastMessage(app, "user", cleanMessage);
                     handler.post(callback::onCancelled);
@@ -399,7 +421,8 @@ public class LaibaChatEngine {
             Request request,
             StringBuilder raw,
             android.os.Handler handler,
-            Callback callback) throws Exception {
+            Callback callback,
+            JSONObject[] usageMetadata) throws Exception {
 
         HttpURLConnection connection = null;
 
@@ -463,6 +486,12 @@ public class LaibaChatEngine {
                         event = new JSONObject(data);
                     } catch (Exception malformedEvent) {
                         continue;
+                    }
+
+                    JSONObject receivedUsage =
+                            event.optJSONObject("usageMetadata");
+                    if (receivedUsage != null) {
+                        usageMetadata[0] = receivedUsage;
                     }
 
                     JSONArray candidates = event.optJSONArray("candidates");

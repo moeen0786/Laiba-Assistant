@@ -1435,6 +1435,7 @@ public class MainActivity extends Activity {
         target.addView(card, lp);
         card.setOnClickListener(v -> {
             if ("Chat History".equals(title)) showChatHistory();
+            else if ("Token Usage".equals(title)) showTokenUsage();
             else showMenuPreview(title, description, symbol);
         });
     }
@@ -1481,6 +1482,7 @@ public class MainActivity extends Activity {
         LinearLayout items = column();
         items.setPadding(dp(1), dp(2), dp(1), dp(12));
         addMenuItem(items, "◷", "Chat History", "Past conversations");
+        addMenuItem(items, "◈", "Token Usage", "API tokens and usage analytics");
         addMenuItem(items, "◉", "Call History", "Voice sessions");
         addMenuItem(items, "✧", "AI Tools", "Your smart toolkit");
         addMenuItem(items, "⚙", "Settings", "Personalize Laiba");
@@ -1523,6 +1525,156 @@ public class MainActivity extends Activity {
             list.addView(text("No saved messages yet.", 14, 0xffaab8df, false));
         scroll.addView(list);
         page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+    }
+
+    private String usageNumber(long value) {
+        return String.format(java.util.Locale.US, "%,d", value);
+    }
+
+    private void usageMetric(
+            LinearLayout target, String title, String value, String subtitle) {
+
+        LinearLayout card = column();
+        card.setGravity(Gravity.LEFT);
+        card.setPadding(dp(14), dp(14), dp(14), dp(14));
+        card.setBackground(shape(
+                0xff152344, dp(17), dp(1), 0xff31558c));
+
+        TextView heading = text(title, 12, 0xffaab8df, true);
+        heading.setGravity(Gravity.LEFT);
+        card.addView(heading);
+
+        TextView number = text(value, 22, Color.WHITE, true);
+        number.setGravity(Gravity.LEFT);
+        card.addView(number);
+
+        TextView detail = text(subtitle, 10, 0xffaab8df, false);
+        detail.setGravity(Gravity.LEFT);
+        card.addView(detail);
+
+        LinearLayout.LayoutParams lp =
+                new LinearLayout.LayoutParams(-1, -2);
+        lp.bottomMargin = dp(9);
+        target.addView(card, lp);
+    }
+
+    private void showTokenUsage() {
+        menuState = 2;
+        base();
+
+        LinearLayout header = row();
+        TextView back = createBackButton();
+        header.addView(back,
+                new LinearLayout.LayoutParams(dp(48), dp(48)));
+        back.setOnClickListener(v -> showMenu());
+
+        header.addView(text("TOKEN USAGE", 16, Color.WHITE, true));
+        page.addView(header);
+        gap(page, dp(12));
+
+        org.json.JSONObject stats = TokenUsageManager.summary(this);
+
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout content = column();
+        content.setGravity(Gravity.TOP);
+        content.setPadding(0, dp(3), 0, dp(12));
+
+        content.addView(text(
+                "GEMINI API ANALYTICS", 11, cyan, true));
+        gap(content, dp(12));
+
+        usageMetric(content, "TODAY",
+                usageNumber(stats.optLong("dayTotal", 0)),
+                "Input: " + usageNumber(stats.optLong("dayInput", 0))
+                        + "  •  Output: "
+                        + usageNumber(stats.optLong("dayOutput", 0)));
+
+        usageMetric(content, "THIS WEEK",
+                usageNumber(stats.optLong("weekTotal", 0)),
+                "Input: " + usageNumber(stats.optLong("weekInput", 0))
+                        + "  •  Output: "
+                        + usageNumber(stats.optLong("weekOutput", 0)));
+
+        usageMetric(content, "THIS MONTH",
+                usageNumber(stats.optLong("monthTotal", 0)),
+                "Input: " + usageNumber(stats.optLong("monthInput", 0))
+                        + "  •  Output: "
+                        + usageNumber(stats.optLong("monthOutput", 0)));
+
+        gap(content, dp(8));
+        content.addView(text(
+                "REQUEST STATISTICS", 11, cyan, true));
+        gap(content, dp(10));
+
+        usageMetric(content, "API REQUESTS",
+                usageNumber(stats.optLong("requests", 0)),
+                "Successful: " + usageNumber(stats.optLong("successful", 0))
+                        + "  •  Failed: "
+                        + usageNumber(stats.optLong("failures", 0)));
+
+        usageMetric(content, "USAGE DATA NOT PROVIDED",
+                usageNumber(stats.optLong("unknownUsage", 0)),
+                "Requests for which Gemini did not return token metadata.");
+
+        gap(content, dp(8));
+        content.addView(text(
+                "RECENT API ACTIVITY", 11, cyan, true));
+        gap(content, dp(8));
+
+        org.json.JSONArray records = TokenUsageManager.records(this);
+        int shown = 0;
+
+        for (int i = records.length() - 1; i >= 0 && shown < 12; i--) {
+            org.json.JSONObject item = records.optJSONObject(i);
+            if (item == null) continue;
+
+            boolean success = item.optBoolean("success", false);
+            long timestamp = item.optLong("timestamp", 0);
+
+            String date = android.text.format.DateFormat.format(
+                    "dd MMM, HH:mm", timestamp).toString();
+
+            String tokens = item.optLong("totalTokens", -1) < 0
+                    ? "Token count unavailable"
+                    : usageNumber(item.optLong("totalTokens", 0))
+                            + " tokens";
+
+            String status = success ? "SUCCESS" : "FAILED";
+
+            TextView line = text(
+                    status + "  •  " + date + "\n" + tokens
+                            + "  •  Attempts: "
+                            + item.optInt("attempts", 0),
+                    12, success ? 0xffa9e7ff : 0xffffa8b5, false);
+
+            line.setGravity(Gravity.LEFT);
+            line.setPadding(dp(12), dp(11), dp(12), dp(11));
+            line.setBackground(shape(
+                    0xff192640, dp(13), dp(1), 0xff30496c));
+
+            LinearLayout.LayoutParams lp =
+                    new LinearLayout.LayoutParams(-1, -2);
+            lp.bottomMargin = dp(7);
+            content.addView(line, lp);
+            shown++;
+        }
+
+        if (shown == 0) {
+            content.addView(text(
+                    "No API activity recorded yet.",
+                    13, 0xffaab8df, false));
+        }
+
+        gap(content, dp(10));
+        content.addView(text(
+                "Token counts are based on Gemini usageMetadata. "
+                        + "Unavailable counts are not estimated. "
+                        + "No chat messages or API keys are stored here.",
+                11, 0xff8296c2, false));
+
+        scroll.addView(content);
+        page.addView(scroll,
+                new LinearLayout.LayoutParams(-1, 0, 1));
     }
 
     private void showMenuPreview(String title, String description, String symbol) {
