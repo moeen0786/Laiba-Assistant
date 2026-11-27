@@ -23,7 +23,7 @@ import java.util.concurrent.ExecutionException;
 
 public class LaibaChatEngine {
 
-    private static final int MAX_API_ATTEMPTS = 1;
+    private static final int MAX_API_ATTEMPTS = 5;
 
     private static final String PREFS = "laiba_chat_memory_v1";
     private static final String HISTORY_KEY = "history";

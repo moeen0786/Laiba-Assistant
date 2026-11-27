@@ -109,7 +109,7 @@ public final class ApiRateLimitHandler {
             message = "Gemini returned HTTP 429. "
                     + "Google reported a rate or quota limit. "
                     + "Daily quota may still be available. "
-                    + "Automatic retry disabled. One request was sent.";
+                    + "Automatic retries exhausted after 5 attempts.";
         } else {
             message = detailedProviderError(status, body);
         }
@@ -168,7 +168,7 @@ public final class ApiRateLimitHandler {
             output.append("\\nGoogle response could not be parsed.");
         }
 
-        output.append("\\nAutomatic retry disabled. One request was sent.");
+        output.append("\\nAutomatic retries exhausted after 5 attempts.");
 
         if (output.length() > 1000) {
             return output.substring(0, 997) + "...";
