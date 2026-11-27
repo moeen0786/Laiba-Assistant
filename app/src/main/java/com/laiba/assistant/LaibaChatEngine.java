@@ -817,7 +817,8 @@ public class LaibaChatEngine {
                     || code == 502 || code == 503 || code == 504;
         }
         return error instanceof SocketTimeoutException
-                || error instanceof IOException;
+                || error instanceof IOException
+                || error instanceof org.json.JSONException;
     }
 
     // Reads the "reply" JSON string while it is still being generated.
