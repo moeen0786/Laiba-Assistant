@@ -103,9 +103,19 @@ public final class ApiRateLimitHandler {
 
         persistCooldown(context, delay);
 
-        return new Policy(true, false, delay,
-                "Gemini rate limit reached. Retrying after "
-                        + (delay / 1000L) + " seconds.");
+        String message;
+
+        if (status == 429) {
+            message = "Gemini returned HTTP 429. "
+                    + "Google reported a rate or quota limit. "
+                    + "Daily quota may still be available. "
+                    + "Automatic retry was not performed.";
+        } else {
+            message = "Gemini temporarily failed with HTTP "
+                    + status + ". Automatic retry was not performed.";
+        }
+
+        return new Policy(true, false, delay, message);
     }
 
     public static long backoffDelay(int attempt) {

@@ -49,6 +49,7 @@ public final class LocalMemorySystem {
         int memoryStart = Math.max(0, memories.length() - MEMORY_LIMIT);
 
         for (int i = memoryStart; i < memories.length(); i++) {
+            if (Thread.currentThread().isInterrupted()) return null;
             String fact = memories.optString(i, "").trim();
             addCandidate(
                     candidates, seen, queryTerms,
@@ -61,6 +62,7 @@ public final class LocalMemorySystem {
         int historyStart = Math.max(0, history.length() - HISTORY_LIMIT);
 
         for (int i = historyStart; i < history.length(); i++) {
+            if (Thread.currentThread().isInterrupted()) return null;
             JSONObject item = history.optJSONObject(i);
             if (item == null) continue;
 

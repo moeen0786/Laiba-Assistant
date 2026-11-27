@@ -16,6 +16,10 @@ import java.nio.charset.StandardCharsets;
 import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.ExecutionException;
 
 public class LaibaChatEngine {
 
@@ -311,8 +315,40 @@ public class LaibaChatEngine {
                 long localSearchStarted =
                         android.os.SystemClock.elapsedRealtime();
 
-                String localAnswer =
-                        LocalMemorySystem.findAnswer(app, cleanMessage);
+                FutureTask<String> memoryTask = new FutureTask<>(
+                        () -> LocalMemorySystem.findAnswer(app, cleanMessage));
+
+                Thread memoryThread = new Thread(
+                        memoryTask, "Laiba-Memory-500ms");
+                memoryThread.setDaemon(true);
+                memoryThread.start();
+
+                String localAnswer = null;
+                boolean memoryTimedOut = false;
+
+                try {
+                    localAnswer = memoryTask.get(500L, TimeUnit.MILLISECONDS);
+
+                } catch (TimeoutException timeout) {
+                    memoryTimedOut = true;
+                    memoryTask.cancel(true);
+
+                } catch (ExecutionException lookupError) {
+                    android.util.Log.e(
+                            "LaibaLocalMemory",
+                            "Local search failed; Gemini fallback",
+                            lookupError.getCause());
+
+                } catch (InterruptedException interrupted) {
+                    memoryTask.cancel(true);
+
+                    if (request.isCancelled()) {
+                        handler.post(callback::onCancelled);
+                        return;
+                    }
+
+                    Thread.interrupted();
+                }
 
                 long localSearchMillis =
                         android.os.SystemClock.elapsedRealtime()
@@ -320,8 +356,11 @@ public class LaibaChatEngine {
 
                 android.util.Log.i(
                         "LaibaLocalMemory",
-                        "scan_ms=" + localSearchMillis
-                                + " history_limit=500 memory_limit=300");
+                        "elapsed_ms=" + localSearchMillis
+                                + " budget_ms=500"
+                                + " timed_out=" + memoryTimedOut
+                                + " history_limit=500 memory_limit=300"
+                                + " matched=" + (localAnswer != null));
 
                 if (request.isCancelled()) {
                     handler.post(callback::onCancelled);
@@ -602,8 +641,8 @@ public class LaibaChatEngine {
             }
 
             connection.setRequestMethod("POST");
-            connection.setConnectTimeout(10000);
-            connection.setReadTimeout(45000);
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(15000);
             connection.setDoOutput(true);
             connection.setUseCaches(false);
             connection.setRequestProperty("Accept", "text/event-stream");
