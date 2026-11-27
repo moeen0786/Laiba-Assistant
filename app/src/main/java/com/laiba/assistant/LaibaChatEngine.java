@@ -16,13 +16,17 @@ import java.nio.charset.StandardCharsets;
 import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.ExecutionException;
 
 public class LaibaChatEngine {
 
     private static final String PREFS = "laiba_chat_memory_v1";
     private static final String HISTORY_KEY = "history";
     private static final String MEMORY_KEY = "memory";
-    private static final int HISTORY_LIMIT = 200;
+    private static final int HISTORY_LIMIT = 500;
     private static final int MEMORY_LIMIT = 300;
 
     public interface Callback {
@@ -32,17 +36,60 @@ public class LaibaChatEngine {
         void onCancelled();
     }
 
+    public interface ApiKeyProvider {
+        String load() throws Exception;
+    }
+
     public static final class Request {
         private final AtomicBoolean cancelled = new AtomicBoolean(false);
         private volatile HttpURLConnection connection;
         private volatile Thread worker;
+        private boolean completed;
 
         public void cancel() {
-            if (!cancelled.compareAndSet(false, true)) return;
-            HttpURLConnection active = connection;
+            HttpURLConnection active;
+            Thread running;
+
+            synchronized (this) {
+                if (completed || !cancelled.compareAndSet(false, true)) return;
+                active = connection;
+                connection = null;
+                running = worker;
+            }
+
             if (active != null) active.disconnect();
-            Thread running = worker;
             if (running != null) running.interrupt();
+        }
+
+        public synchronized boolean markCompleted() {
+            if (cancelled.get()) return false;
+            completed = true;
+            return true;
+        }
+
+        private synchronized boolean attachConnection(
+                HttpURLConnection active) {
+            if (cancelled.get()) {
+                active.disconnect();
+                return false;
+            }
+
+            connection = active;
+
+            if (cancelled.get()) {
+                connection = null;
+                active.disconnect();
+                return false;
+            }
+
+            return true;
+        }
+
+        private synchronized void clearConnection(
+                HttpURLConnection active) {
+            if (connection == active) {
+                connection = null;
+            }
         }
 
         public boolean isCancelled() {
@@ -215,6 +262,15 @@ public class LaibaChatEngine {
 
     public static Request send(
             Context context, String apiKey, String message, Callback callback) {
+        return sendWithApiKeyProvider(
+                context, () -> apiKey, message, callback);
+    }
+
+    public static Request sendWithApiKeyProvider(
+            Context context,
+            ApiKeyProvider apiKeyProvider,
+            String message,
+            Callback callback) {
 
         final Context app = context.getApplicationContext();
         final String cleanMessage = message == null ? "" : message.trim();
@@ -227,16 +283,6 @@ public class LaibaChatEngine {
             return request;
         }
 
-        String explicitFact = explicitMemoryText(app, cleanMessage);
-        if (explicitFact != null) {
-            saveMemory(app, explicitFact);
-            handler.post(() -> callback.onReply(
-                    "ٹھیک ہے، میں نے یہ بات اپنی الگ Memory میں محفوظ کر لی ہے۔"));
-            return request;
-        }
-
-        addMessage(app, "user", cleanMessage);
-
         Thread worker = new Thread(() -> {
             String finalReply = null;
             JSONObject[] usageMetadata = new JSONObject[1];
@@ -245,35 +291,125 @@ public class LaibaChatEngine {
             boolean usageRecorded = false;
 
             try {
+                if (request.isCancelled()) {
+                    handler.post(callback::onCancelled);
+                    return;
+                }
+
+                // Save-memory commands are also processed off the UI thread.
+                String explicitFact = explicitMemoryText(app, cleanMessage);
+                if (explicitFact != null) {
+                    if (!request.markCompleted()) {
+                        handler.post(callback::onCancelled);
+                        return;
+                    }
+
+                    saveMemory(app, explicitFact);
+                    handler.post(() -> callback.onReply(
+                            "ٹھیک ہے، میں نے یہ بات اپنی الگ Memory میں محفوظ کر لی ہے۔"));
+                    return;
+                }
+
+                // Search up to 500 chat messages and 300 saved memory facts.
+                // This scan runs on this worker, never on Android's UI thread.
+                long localSearchStarted =
+                        android.os.SystemClock.elapsedRealtime();
+
+                FutureTask<String> memoryTask = new FutureTask<>(
+                        () -> LocalMemorySystem.findAnswer(app, cleanMessage));
+
+                Thread memoryThread = new Thread(
+                        memoryTask, "Laiba-Memory-500ms");
+                memoryThread.setDaemon(true);
+                memoryThread.start();
+
+                String localAnswer = null;
+                boolean memoryTimedOut = false;
+
+                try {
+                    localAnswer = memoryTask.get(500L, TimeUnit.MILLISECONDS);
+
+                } catch (TimeoutException timeout) {
+                    memoryTimedOut = true;
+                    memoryTask.cancel(true);
+
+                } catch (ExecutionException lookupError) {
+                    android.util.Log.e(
+                            "LaibaLocalMemory",
+                            "Local search failed; Gemini fallback",
+                            lookupError.getCause());
+
+                } catch (InterruptedException interrupted) {
+                    memoryTask.cancel(true);
+
+                    if (request.isCancelled()) {
+                        handler.post(callback::onCancelled);
+                        return;
+                    }
+
+                    Thread.interrupted();
+                }
+
+                long localSearchMillis =
+                        android.os.SystemClock.elapsedRealtime()
+                                - localSearchStarted;
+
+                android.util.Log.i(
+                        "LaibaLocalMemory",
+                        "elapsed_ms=" + localSearchMillis
+                                + " budget_ms=500"
+                                + " timed_out=" + memoryTimedOut
+                                + " history_limit=500 memory_limit=300"
+                                + " matched=" + (localAnswer != null));
+
+                if (request.isCancelled()) {
+                    handler.post(callback::onCancelled);
+                    return;
+                }
+
+                if (localAnswer != null) {
+                    if (!request.markCompleted()) {
+                        handler.post(callback::onCancelled);
+                        return;
+                    }
+
+                    addMessage(app, "user", cleanMessage);
+                    addMessage(app, "model", localAnswer);
+
+                    final String answer = localAnswer;
+                    handler.post(() -> callback.onReply(answer));
+                    return;
+                }
+
+                // No strong local match: save the new question, then use Gemini.
+                addMessage(app, "user", cleanMessage);
+
+                // Do not decrypt/load the API key unless Gemini is required.
+                String apiKey = apiKeyProvider == null
+                        ? null : apiKeyProvider.load();
+
                 if (apiKey == null || apiKey.trim().isEmpty()) {
                     throw new Exception(
                             "Gemini API key is missing. Please add it in Settings.");
                 }
 
-                JSONArray savedMemory = memory(app);
-                StringBuilder memoryText = new StringBuilder();
-
-                for (int i = 0; i < savedMemory.length(); i++) {
-                    memoryText.append("- ")
-                            .append(savedMemory.optString(i))
-                            .append("\n");
-                }
-
                 String systemPrompt =
                         "You are Laiba, a helpful personal AI assistant. " +
                         "Reply naturally in the language used by the user. " +
-                        "Use the supplied saved memory when relevant. " +
+                        "Answer the current user message accurately. " +
+                        "Do not assume access to previous conversations or " +
+                        "private saved memories. Do not invent personal facts. " +
                         "Return ONLY valid JSON with exactly these fields: " +
                         "\"reply\" (string) and \"memories\" (array of strings). " +
-                        "The reply must be the actual answer to the user. " +
+                        "The reply must answer the current user message. " +
                         "The memories array should contain only useful, stable, " +
                         "non-sensitive facts worth remembering for future chats. " +
                         "Never save passwords, API keys, OTPs, financial secrets, " +
-                        "or sensitive personal information. Do not invent facts. " +
-                        "If there are no useful new memories, return an empty array.\n\n" +
-                        "SAVED MEMORY:\n" + memoryText;
+                        "or sensitive personal information. " +
+                        "If there are no useful new memories, return an empty array.";
 
-                JSONArray contents = buildContents(history(app));
+                // Only the new user message is included in Gemini contents.
+                JSONArray contents = buildContents(cleanMessage);
                 JSONObject body = new JSONObject();
 
                 JSONObject systemInstruction = new JSONObject();
@@ -285,30 +421,45 @@ public class LaibaChatEngine {
 
                 JSONObject generationConfig = new JSONObject();
                 generationConfig.put("responseMimeType", "application/json");
-                generationConfig.put("temperature", 0.7);
-                generationConfig.put("maxOutputTokens", 8192);
+
+                JSONObject responseSchema = new JSONObject();
+                responseSchema.put("type", "OBJECT");
+
+                JSONObject properties = new JSONObject();
+                properties.put("reply",
+                        new JSONObject().put("type", "STRING"));
+
+                JSONObject memorySchema = new JSONObject();
+                memorySchema.put("type", "ARRAY");
+                memorySchema.put("items",
+                        new JSONObject().put("type", "STRING"));
+                properties.put("memories", memorySchema);
+
+                responseSchema.put("properties", properties);
+
+                JSONArray required = new JSONArray();
+                required.put("reply");
+                required.put("memories");
+                responseSchema.put("required", required);
+
+                generationConfig.put("responseSchema", responseSchema);
+                generationConfig.put("maxOutputTokens", 1024);
+
+                JSONObject thinkingConfig = new JSONObject();
+                thinkingConfig.put("thinkingLevel", "minimal");
+                generationConfig.put("thinkingConfig", thinkingConfig);
                 body.put("generationConfig", generationConfig);
 
                 String endpoint =
                         "https://generativelanguage.googleapis.com/v1beta/models/" +
-                        "gemini-3.8-flash:streamGenerateContent?alt=sse";
+                        "gemma-4-31b-it:streamGenerateContent?alt=sse";
 
                 StringBuilder raw = new StringBuilder();
                 Exception lastError = null;
-                // Retry transient network/server failures, never duplicate a
-                // completed answer, and reset the live bubble before retrying.
-                // Respect a cooldown created by an earlier API request.
-                if (!ApiRateLimitHandler.waitForCooldown(app, request)) {
-                    if (request.isCancelled()) {
-                        removeLastMessage(app, "user", cleanMessage);
-                        handler.post(callback::onCancelled);
-                        return;
-                    }
-                    throw new Exception(
-                            "Cooldown wait interrupted. Please try again.");
-                }
+                // Send the current question immediately.
+                // No pre-request cooldown wait or automatic retry.
 
-                for (int attempt = 0; attempt < 4; attempt++) {
+                for (int attempt = 0; attempt < 1; attempt++) {
                     if (request.isCancelled()) break;
 
                     raw.setLength(0);
@@ -357,7 +508,7 @@ public class LaibaChatEngine {
                                             http.retryAfter,
                                             attempt);
 
-                            if (!policy.retryable || attempt >= 3) {
+                            if (!policy.retryable || attempt >= 0) {
                                 lastError = new Exception(policy.message);
                                 break;
                             }
@@ -365,7 +516,7 @@ public class LaibaChatEngine {
                             retryDelay = policy.delayMillis;
 
                         } else {
-                            if (attempt >= 3 || !isRetryable(failure)) break;
+                            if (attempt >= 0 || !isRetryable(failure)) break;
                             retryDelay = ApiRateLimitHandler.backoffDelay(attempt);
                         }
 
@@ -413,17 +564,17 @@ public class LaibaChatEngine {
                     throw new Exception("Gemini returned an empty reply.");
                 }
 
+                if (!request.markCompleted()) {
+                    removeLastMessage(app, "user", cleanMessage);
+                    handler.post(callback::onCancelled);
+                    return;
+                }
+
                 JSONArray newMemories = result.optJSONArray("memories");
                 if (newMemories != null) {
                     for (int i = 0; i < newMemories.length(); i++) {
                         saveMemory(app, newMemories.optString(i));
                     }
-                }
-
-                if (request.isCancelled()) {
-                    removeLastMessage(app, "user", cleanMessage);
-                    handler.post(callback::onCancelled);
-                    return;
                 }
 
                 if (!usageRecorded) {
@@ -484,11 +635,14 @@ public class LaibaChatEngine {
 
         try {
             connection = (HttpURLConnection) new URL(endpoint).openConnection();
-            request.connection = connection;
+
+            if (!request.attachConnection(connection)) {
+                return;
+            }
 
             connection.setRequestMethod("POST");
-            connection.setConnectTimeout(20000);
-            connection.setReadTimeout(120000);
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(15000);
             connection.setDoOutput(true);
             connection.setUseCaches(false);
             connection.setRequestProperty("Accept", "text/event-stream");
@@ -591,8 +745,10 @@ public class LaibaChatEngine {
             }
 
         } finally {
-            request.connection = null;
-            if (connection != null) connection.disconnect();
+            if (connection != null) {
+                request.clearConnection(connection);
+                connection.disconnect();
+            }
         }
     }
 
@@ -711,41 +867,20 @@ public class LaibaChatEngine {
         return decoded.toString();
     }
 
-    private static JSONArray buildContents(JSONArray history) throws Exception {
+    // Gemini receives only the current user message.
+    // Local history and saved memory are searched before this method is called.
+    private static JSONArray buildContents(String currentMessage)
+            throws Exception {
+
+        JSONObject entry = new JSONObject();
+        entry.put("role", "user");
+
+        JSONArray parts = new JSONArray();
+        parts.put(new JSONObject().put("text", currentMessage));
+        entry.put("parts", parts);
+
         JSONArray contents = new JSONArray();
-        int start = Math.max(0, history.length() - 30);
-
-        for (int i = start; i < history.length(); i++) {
-            JSONObject item = history.optJSONObject(i);
-            if (item == null) continue;
-
-            String role = "model".equals(item.optString("role"))
-                    ? "model" : "user";
-            String text = item.optString("text", "");
-            if (text.trim().isEmpty()) continue;
-
-            if (contents.length() > 0) {
-                JSONObject previous = contents.optJSONObject(contents.length() - 1);
-
-                if (previous != null && role.equals(previous.optString("role"))) {
-                    JSONArray previousParts = previous.optJSONArray("parts");
-                    if (previousParts != null) {
-                        previousParts.put(new JSONObject().put("text", text));
-                        continue;
-                    }
-                }
-            }
-
-            JSONObject entry = new JSONObject();
-            entry.put("role", role);
-
-            JSONArray parts = new JSONArray();
-            parts.put(new JSONObject().put("text", text));
-            entry.put("parts", parts);
-
-            contents.put(entry);
-        }
-
+        contents.put(entry);
         return contents;
     }
 

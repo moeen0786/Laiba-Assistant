@@ -19,6 +19,7 @@ public final class ApiRateLimitHandler {
 
     private static final long BASE_DELAY = 1000L;
     private static final long MAX_BACKOFF = 60000L;
+    private static final long MAX_SERVER_DELAY = 86400000L;
 
     private ApiRateLimitHandler() {}
 
@@ -80,7 +81,8 @@ public final class ApiRateLimitHandler {
                 || status == 500 || status == 502
                 || status == 503 || status == 504
                 || (status == 403 && containsAny(combined,
-                    "quota", "rate limit", "resource_exhausted"));
+                    "quota", "rate limit", "rate_limit",
+                    "ratelimitexceeded", "resource_exhausted"));
 
         if (!retryable) {
             return new Policy(false, false, 0,
@@ -96,13 +98,83 @@ public final class ApiRateLimitHandler {
                 ? serverDelay
                 : backoffDelay(attempt);
 
-        delay = Math.max(1000L, delay);
+        delay = Math.max(1000L,
+                Math.min(MAX_SERVER_DELAY, delay));
 
         persistCooldown(context, delay);
 
-        return new Policy(true, false, delay,
-                "Gemini rate limit reached. Retrying after "
-                        + (delay / 1000L) + " seconds.");
+        String message;
+
+        if (status == 429) {
+            message = "Gemini returned HTTP 429. "
+                    + "Google reported a rate or quota limit. "
+                    + "Daily quota may still be available. "
+                    + "Automatic retry was not performed.";
+        } else {
+            message = detailedProviderError(status, body);
+        }
+
+        return new Policy(true, false, delay, message);
+    }
+
+    private static String detailedProviderError(
+            int httpStatus, String responseBody) {
+
+        StringBuilder output = new StringBuilder();
+        output.append("Google API HTTP ").append(httpStatus);
+
+        try {
+            JSONObject root = new JSONObject(responseBody);
+            JSONObject error = root.optJSONObject("error");
+
+            if (error == null) {
+                output.append("\\nGoogle did not provide a structured error.");
+            } else {
+                String status = error.optString("status", "").trim();
+                String message = error.optString("message", "").trim();
+
+                if (!status.isEmpty()) {
+                    output.append("\\nStatus: ").append(status);
+                }
+
+                if (!message.isEmpty()) {
+                    output.append("\\nGoogle message: ").append(message);
+                }
+
+                JSONArray details = error.optJSONArray("details");
+                if (details != null) {
+                    for (int i = 0; i < details.length(); i++) {
+                        JSONObject detail = details.optJSONObject(i);
+                        if (detail == null) continue;
+
+                        String reason = detail.optString("reason", "").trim();
+                        String description =
+                                detail.optString("description", "").trim();
+                        String domain = detail.optString("domain", "").trim();
+
+                        if (!reason.isEmpty()) {
+                            output.append("\\nReason: ").append(reason);
+                        }
+                        if (!description.isEmpty()) {
+                            output.append("\\nDetails: ").append(description);
+                        }
+                        if (!domain.isEmpty()) {
+                            output.append("\\nDomain: ").append(domain);
+                        }
+                    }
+                }
+            }
+        } catch (Exception parseError) {
+            output.append("\\nGoogle response could not be parsed.");
+        }
+
+        output.append("\\nAutomatic retry was not performed.");
+
+        if (output.length() > 1000) {
+            return output.substring(0, 997) + "...";
+        }
+
+        return output.toString();
     }
 
     public static long backoffDelay(int attempt) {
@@ -134,7 +206,9 @@ public final class ApiRateLimitHandler {
     }
 
     private static void persistCooldown(Context context, long delay) {
-        long until = System.currentTimeMillis() + delay;
+        long now = System.currentTimeMillis();
+        long until = delay > Long.MAX_VALUE - now
+                ? Long.MAX_VALUE : now + delay;
 
         synchronized (ApiRateLimitHandler.class) {
             long existing = prefs(context).getLong(COOLDOWN, 0L);
@@ -166,7 +240,11 @@ public final class ApiRateLimitHandler {
     public static boolean waitBeforeRetry(
             LaibaChatEngine.Request request, long delay) {
 
-        long deadline = System.currentTimeMillis() + delay;
+        long safeDelay = Math.max(0L,
+                Math.min(MAX_SERVER_DELAY, delay));
+        long now = System.currentTimeMillis();
+        long deadline = safeDelay > Long.MAX_VALUE - now
+                ? Long.MAX_VALUE : now + safeDelay;
 
         while (!request.isCancelled()) {
             long remaining = deadline - System.currentTimeMillis();
@@ -191,8 +269,10 @@ public final class ApiRateLimitHandler {
 
         try {
             double seconds = Double.parseDouble(input);
-            if (seconds >= 0) {
-                return (long) Math.ceil(seconds * 1000.0);
+            if (Double.isFinite(seconds) && seconds >= 0) {
+                return (long) Math.min(
+                        MAX_SERVER_DELAY,
+                        Math.ceil(seconds * 1000.0));
             }
         } catch (NumberFormatException ignored) {
         }
@@ -204,8 +284,10 @@ public final class ApiRateLimitHandler {
 
             Date date = format.parse(input);
             if (date != null) {
-                return Math.max(0,
-                        date.getTime() - System.currentTimeMillis());
+                long remaining = date.getTime()
+                        - System.currentTimeMillis();
+                return Math.max(0L,
+                        Math.min(MAX_SERVER_DELAY, remaining));
             }
         } catch (Exception ignored) {
         }
@@ -236,8 +318,9 @@ public final class ApiRateLimitHandler {
                 double seconds = Double.parseDouble(
                         duration.substring(0, duration.length() - 1));
 
-                return seconds >= 0
-                        ? (long) Math.ceil(seconds * 1000.0) : 0;
+                return Double.isFinite(seconds) && seconds >= 0
+                        ? (long) Math.min(MAX_SERVER_DELAY,
+                                Math.ceil(seconds * 1000.0)) : 0;
             }
         } catch (Exception ignored) {
         }
