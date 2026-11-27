@@ -55,6 +55,9 @@ public class MainActivity extends Activity {
     private TextView chatSendButton;
     private LinearLayout streamingBubble;
     private String streamingReplyText = "";
+    private InternetConnectionManager internetConnectionManager;
+    private TextView networkStatusBanner;
+    private EditText chatInput;
 
 
 
@@ -63,6 +66,39 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
         showSplash();
+    }
+
+    @Override protected void onStart() {
+        super.onStart();
+
+        if (internetConnectionManager == null) {
+            internetConnectionManager =
+                new InternetConnectionManager(this);
+        }
+
+        internetConnectionManager.start(this::updateInternetStatus);
+    }
+
+    @Override protected void onStop() {
+        if (internetConnectionManager != null) {
+            internetConnectionManager.stop();
+        }
+        super.onStop();
+    }
+
+    private boolean hasInternetConnection() {
+        return InternetConnectionManager.hasValidatedInternet(this);
+    }
+
+    private void updateInternetStatus(boolean available) {
+        if (networkStatusBanner == null ||
+                networkStatusBanner.getParent() == null) {
+            return;
+        }
+
+        networkStatusBanner.setVisibility(
+            available ? View.GONE : View.VISIBLE
+        );
     }
 
     private GradientDrawable shape(int color, int radius, int stroke, int strokeColor) {
@@ -599,13 +635,30 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             try {
                 String key = loadApiKeySecurely();
-                if (key == null || !verifyGoogleApiKey(key)) {
+                if (key == null || key.trim().isEmpty()) {
                     runOnUiThread(this::showVerification);
                     return;
                 }
+
+                if (!hasInternetConnection()) {
+                    runOnUiThread(this::showChat);
+                    return;
+                }
+
+                if (!verifyGoogleApiKey(key)) {
+                    runOnUiThread(this::showVerification);
+                    return;
+                }
+
                 runOnUiThread(this::showChat);
             } catch (Exception e) {
-                runOnUiThread(this::showVerification);
+                runOnUiThread(() -> {
+                    if (hasInternetConnection()) {
+                        showVerification();
+                    } else {
+                        showChat();
+                    }
+                });
             }
         }).start();
     }
@@ -692,6 +745,13 @@ public class MainActivity extends Activity {
 
             if (key.isEmpty() || key.length() < 20) {
                 status.setText("Please enter a valid API key.");
+                return;
+            }
+
+            if (!hasInternetConnection()) {
+                status.setText(
+                    "No internet connection. Connect and try again."
+                );
                 return;
             }
 
@@ -950,6 +1010,25 @@ public class MainActivity extends Activity {
             new LinearLayout.LayoutParams(35,45));
 
         page.addView(header);
+
+        networkStatusBanner = text(
+            "No internet connection. Check Wi-Fi or mobile data.",
+            12, 0xffffc2ce, true
+        );
+        networkStatusBanner.setPadding(
+            dp(12), dp(10), dp(12), dp(10)
+        );
+        networkStatusBanner.setBackground(
+            shape(0xff39202d, dp(13), dp(1), 0xffa34d69)
+        );
+
+        page.addView(
+            networkStatusBanner,
+            new LinearLayout.LayoutParams(-1, -2)
+        );
+
+        updateInternetStatus(hasInternetConnection());
+
         gap(page, 6);
         page.addView(text("✦", 46, cyan, true));
         page.addView(text("Good evening", 24, Color.WHITE, true));
@@ -975,6 +1054,7 @@ public class MainActivity extends Activity {
         composer.addView(plus, new LinearLayout.LayoutParams(dp(42), dp(42)));
 
         EditText input = new EditText(this);
+        chatInput = input;
         input.setHint("Message Laiba…");
         input.setHintTextColor(0xff929fbe);
         input.setTextColor(Color.WHITE);
@@ -1069,7 +1149,7 @@ public class MainActivity extends Activity {
             chatScroll.fullScroll(View.FOCUS_DOWN));
     }
 
-    private void addChatBubble(String value, boolean user) {
+    private View addChatBubble(String value, boolean user) {
         View bubble;
 
         if (user) {
@@ -1103,6 +1183,13 @@ public class MainActivity extends Activity {
         lp.gravity = user ? Gravity.RIGHT : Gravity.LEFT;
         lp.bottomMargin = dp(10);
         chatMessages.addView(bubble, lp);
+        return bubble;
+    }
+
+    private void removePendingChatBubble(View bubble) {
+        if (bubble != null && bubble.getParent() instanceof ViewGroup) {
+            ((ViewGroup) bubble.getParent()).removeView(bubble);
+        }
     }
 
     private void showChatLoadingIndicator() {
@@ -1135,8 +1222,26 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void restoreFailedMessage(String message) {
+        if (chatInput == null) return;
+
+        if (chatInput.getText().toString().trim().isEmpty()) {
+            chatInput.setText(message);
+            chatInput.setSelection(chatInput.getText().length());
+        }
+    }
+
     private void sendChatMessage(String message) {
-        addChatBubble(message, true);
+
+        if (!hasInternetConnection()) {
+            if (chatInput != null) {
+                chatInput.setText(message);
+            }
+            updateInternetStatus(false);
+            return;
+        }
+
+        final View pendingUserBubble = addChatBubble(message, true);
         if (chatScroll != null) chatScroll.post(() ->
             chatScroll.fullScroll(View.FOCUS_DOWN));
 
@@ -1158,8 +1263,10 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             removeChatLoadingIndicator();
             chatSending = false;
+            removePendingChatBubble(pendingUserBubble);
             if (chatSendButton != null) chatSendButton.setText("↑");
             addChatBubble("Laiba: " + e.getMessage(), false);
+            restoreFailedMessage(message);
             return;
         }
 
@@ -1246,6 +1353,7 @@ public class MainActivity extends Activity {
                     removeChatLoadingIndicator();
                     chatSending = false;
                     activeChatRequest = null;
+                    removePendingChatBubble(pendingUserBubble);
 
                     if (streamingBubble != null) {
                         ChatMessageRenderer.populate(
@@ -1264,6 +1372,8 @@ public class MainActivity extends Activity {
                         chatSendButton.setText("↑");
                         chatSendButton.setVisibility(View.GONE);
                     }
+
+                    restoreFailedMessage(message);
                 });
             }
 
@@ -1272,6 +1382,7 @@ public class MainActivity extends Activity {
                     removeChatLoadingIndicator();
                     chatSending = false;
                     activeChatRequest = null;
+                    removePendingChatBubble(pendingUserBubble);
 
                     if (streamingBubble != null) {
                         String partial = streamingReplyText;
@@ -1288,6 +1399,8 @@ public class MainActivity extends Activity {
                         chatSendButton.setText("↑");
                         chatSendButton.setVisibility(View.GONE);
                     }
+
+                    restoreFailedMessage(message);
                 });
             }
         });
