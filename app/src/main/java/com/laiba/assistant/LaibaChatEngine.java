@@ -292,7 +292,7 @@ public class LaibaChatEngine {
                 JSONArray savedMemory = memory(app);
                 StringBuilder memoryText = new StringBuilder();
 
-                for (int i = 0; i < savedMemory.length(); i++) {
+                for (int i = Math.max(0, savedMemory.length() - 20); i < savedMemory.length(); i++) {
                     memoryText.append("- ")
                             .append(savedMemory.optString(i))
                             .append("\n");
@@ -325,7 +325,7 @@ public class LaibaChatEngine {
                 JSONObject generationConfig = new JSONObject();
                 generationConfig.put("responseMimeType", "application/json");
                 generationConfig.put("temperature", 0.7);
-                generationConfig.put("maxOutputTokens", 8192);
+                generationConfig.put("maxOutputTokens", 1024);
                 body.put("generationConfig", generationConfig);
 
                 String endpoint =
@@ -347,7 +347,7 @@ public class LaibaChatEngine {
                             "Cooldown wait interrupted. Please try again.");
                 }
 
-                for (int attempt = 0; attempt < 4; attempt++) {
+                for (int attempt = 0; attempt < 1; attempt++) {
                     if (request.isCancelled()) break;
 
                     raw.setLength(0);
@@ -396,7 +396,7 @@ public class LaibaChatEngine {
                                             http.retryAfter,
                                             attempt);
 
-                            if (!policy.retryable || attempt >= 3) {
+                            if (!policy.retryable || attempt >= 0) {
                                 lastError = new Exception(policy.message);
                                 break;
                             }
@@ -404,7 +404,7 @@ public class LaibaChatEngine {
                             retryDelay = policy.delayMillis;
 
                         } else {
-                            if (attempt >= 3 || !isRetryable(failure)) break;
+                            if (attempt >= 0 || !isRetryable(failure)) break;
                             retryDelay = ApiRateLimitHandler.backoffDelay(attempt);
                         }
 
@@ -529,8 +529,8 @@ public class LaibaChatEngine {
             }
 
             connection.setRequestMethod("POST");
-            connection.setConnectTimeout(20000);
-            connection.setReadTimeout(120000);
+            connection.setConnectTimeout(10000);
+            connection.setReadTimeout(45000);
             connection.setDoOutput(true);
             connection.setUseCaches(false);
             connection.setRequestProperty("Accept", "text/event-stream");
@@ -757,7 +757,7 @@ public class LaibaChatEngine {
 
     private static JSONArray buildContents(JSONArray history) throws Exception {
         JSONArray contents = new JSONArray();
-        int start = Math.max(0, history.length() - 30);
+        int start = Math.max(0, history.length() - 12);
 
         for (int i = start; i < history.length(); i++) {
             JSONObject item = history.optJSONObject(i);
