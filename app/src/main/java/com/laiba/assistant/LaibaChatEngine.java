@@ -317,8 +317,11 @@ public class LaibaChatEngine {
 
                 JSONObject generationConfig = new JSONObject();
                 generationConfig.put("responseMimeType", "application/json");
-                generationConfig.put("temperature", 0.7);
                 generationConfig.put("maxOutputTokens", 1024);
+
+                JSONObject thinkingConfig = new JSONObject();
+                thinkingConfig.put("thinkingLevel", "LOW");
+                generationConfig.put("thinkingConfig", thinkingConfig);
                 body.put("generationConfig", generationConfig);
 
                 String endpoint =
