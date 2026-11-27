@@ -1071,6 +1071,7 @@ public class MainActivity extends Activity {
     private void addChatBubble(String value, boolean user) {
         TextView bubble = text(value, 14,
             user ? Color.WHITE : 0xffe7efff, false);
+        if (!user) bubble.setText(MarkdownRenderer.render(value));
         bubble.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         bubble.setTextIsSelectable(true);
         bubble.setPadding(dp(14), dp(11), dp(14), dp(11));
@@ -1179,7 +1180,8 @@ public class MainActivity extends Activity {
                         chatMessages.addView(streamingBubble, params);
                     }
 
-                    streamingBubble.setText(partialReply + "▍");
+                    streamingBubble.setText(
+                        MarkdownRenderer.render(partialReply + "▍"));
 
                     if (chatScroll != null) chatScroll.post(() ->
                         chatScroll.fullScroll(View.FOCUS_DOWN));
@@ -1193,7 +1195,8 @@ public class MainActivity extends Activity {
                     activeChatRequest = null;
 
                     if (streamingBubble != null) {
-                        streamingBubble.setText(reply);
+                        streamingBubble.setText(
+                            MarkdownRenderer.render(reply));
                         streamingBubble = null;
                     } else {
                         addChatBubble(reply, false);
@@ -1216,10 +1219,10 @@ public class MainActivity extends Activity {
                     activeChatRequest = null;
 
                     if (streamingBubble != null) {
-                        streamingBubble.setText(
+                        streamingBubble.setText(MarkdownRenderer.render(
                             streamingBubble.getText().toString()
                                 .replace("▍", "") +
-                            "\n\nConnection interrupted: " + error);
+                            "\n\nConnection interrupted: " + error));
                         streamingBubble = null;
                     } else {
                         addChatBubble(
@@ -1242,9 +1245,9 @@ public class MainActivity extends Activity {
                     if (streamingBubble != null) {
                         String partial = streamingBubble.getText().toString()
                             .replace("▍", "");
-                        streamingBubble.setText(
+                        streamingBubble.setText(MarkdownRenderer.render(
                             partial.isEmpty() ? "Generation stopped." :
-                            partial + "\n\n[Generation stopped]");
+                            partial + "\n\n[Generation stopped]"));
                         streamingBubble = null;
                     }
 
