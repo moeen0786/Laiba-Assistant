@@ -62,6 +62,7 @@ public final class InternetConnectionManager {
         if (listener == null) return;
 
         this.listener = listener;
+        hasPublished = false;
 
         if (connectivityManager == null) {
             publish(false);
