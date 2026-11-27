@@ -21,7 +21,7 @@ import org.json.JSONObject;
 
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class GeminiLiveCallClient {
@@ -46,7 +46,8 @@ public final class GeminiLiveCallClient {
     private final AtomicBoolean ready = new AtomicBoolean(false);
     private final AtomicBoolean playbackRunning = new AtomicBoolean(false);
     private final BlockingQueue<byte[]> playbackQueue =
-        new LinkedBlockingQueue<>();
+        new ArrayBlockingQueue<>(40);
+    private final Object playbackLock = new Object();
     private Thread playbackThread;
 
     private WebSocket socket;
@@ -446,9 +447,16 @@ public final class GeminiLiveCallClient {
                 try {
                     byte[] pcm = playbackQueue.take();
                     AudioTrack current = player;
-                    if (current != null && running.get()) {
-                        current.write(
-                            pcm, 0, pcm.length, AudioTrack.WRITE_BLOCKING);
+                    if (current != null && running.get() &&
+                            audioFocusGranted) {
+                        synchronized (playbackLock) {
+                            if (running.get() && audioFocusGranted &&
+                                    current == player) {
+                                current.write(
+                                    pcm, 0, pcm.length,
+                                    AudioTrack.WRITE_BLOCKING);
+                            }
+                        }
                     }
                 } catch (InterruptedException interrupted) {
                     break;
@@ -465,22 +473,26 @@ public final class GeminiLiveCallClient {
         if (!running.get() || !audioFocusGranted ||
                 player == null || pcm.length == 0) return;
 
-        // Keep memory bounded if the network delivers audio faster than playback.
-        if (playbackQueue.size() > 40) {
+        // Drop oldest audio when the bounded playback queue is full.
+        if (!playbackQueue.offer(pcm)) {
             playbackQueue.poll();
+            playbackQueue.offer(pcm);
         }
-        playbackQueue.offer(pcm);
     }
 
     private synchronized void stopPlayback() {
         playbackQueue.clear();
 
-        if (player != null) {
-            try {
-                player.pause();
-                player.flush();
-                player.play();
-            } catch (Exception ignored) {}
+        synchronized (playbackLock) {
+            if (player != null) {
+                try {
+                    player.pause();
+                    player.flush();
+                    if (running.get() && audioFocusGranted) {
+                        player.play();
+                    }
+                } catch (Exception ignored) {}
+            }
         }
     }
 
