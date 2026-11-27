@@ -75,13 +75,9 @@ public final class GeminiLiveCallClient {
         if (!running.compareAndSet(false, true)) return;
 
         try {
-            android.net.Uri uri = android.net.Uri.parse(ENDPOINT)
-                .buildUpon()
-                .appendQueryParameter("key", apiKey.trim())
-                .build();
-
             Request request = new Request.Builder()
-                .url(uri.toString())
+                .url(ENDPOINT)
+                .header("x-goog-api-key", apiKey.trim())
                 .build();
 
             callback.onStatus("Connecting to Gemini Live...");
