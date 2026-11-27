@@ -53,7 +53,8 @@ public class MainActivity extends Activity {
     private View chatLoadingIndicator;
     private LaibaChatEngine.Request activeChatRequest;
     private TextView chatSendButton;
-    private TextView streamingBubble;
+    private LinearLayout streamingBubble;
+    private String streamingReplyText = "";
 
 
 
@@ -1069,14 +1070,33 @@ public class MainActivity extends Activity {
     }
 
     private void addChatBubble(String value, boolean user) {
-        TextView bubble = text(value, 14,
-            user ? Color.WHITE : 0xffe7efff, false);
-        if (!user) bubble.setText(MarkdownRenderer.render(value));
-        bubble.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
-        bubble.setTextIsSelectable(true);
-        bubble.setPadding(dp(14), dp(11), dp(14), dp(11));
-        bubble.setBackground(shape(user ? 0xff174b91 : 0xff192640,
-            dp(18), dp(1), user ? 0xff367fd0 : 0xff30496c));
+        View bubble;
+
+        if (user) {
+            TextView userBubble = text(value, 14, Color.WHITE, false);
+            userBubble.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+            userBubble.setTextIsSelectable(true);
+            userBubble.setPadding(dp(14), dp(11), dp(14), dp(11));
+            userBubble.setBackground(shape(
+                0xff174b91, dp(18), dp(1), 0xff367fd0));
+            bubble = userBubble;
+
+        } else {
+            LinearLayout assistantBubble = new LinearLayout(this);
+            assistantBubble.setOrientation(LinearLayout.VERTICAL);
+            assistantBubble.setGravity(Gravity.LEFT | Gravity.TOP);
+            assistantBubble.setPadding(
+                dp(14), dp(11), dp(14), dp(11));
+            assistantBubble.setBackground(shape(
+                0xff192640, dp(18), dp(1), 0xff30496c));
+
+            ChatMessageRenderer.populate(
+                assistantBubble, this, value,
+                0xffe7efff, 0xff101a31, 0xffa9e7ff, cyan);
+
+            bubble = assistantBubble;
+        }
+
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
             user ? (int)(getResources().getDisplayMetrics().widthPixels * .82f) : -1,
             -2);
@@ -1160,14 +1180,19 @@ public class MainActivity extends Activity {
                             }
                             streamingBubble = null;
                         }
+                        streamingReplyText = "";
                         return;
                     }
 
+                    streamingReplyText = partialReply;
+
                     if (streamingBubble == null) {
-                        streamingBubble = text("", 14, 0xffe7efff, false);
+                        streamingBubble = new LinearLayout(
+                            MainActivity.this);
+                        streamingBubble.setOrientation(
+                            LinearLayout.VERTICAL);
                         streamingBubble.setGravity(
-                            Gravity.LEFT | Gravity.CENTER_VERTICAL);
-                        streamingBubble.setTextIsSelectable(true);
+                            Gravity.LEFT | Gravity.TOP);
                         streamingBubble.setPadding(
                             dp(14), dp(11), dp(14), dp(11));
                         streamingBubble.setBackground(shape(
@@ -1180,8 +1205,10 @@ public class MainActivity extends Activity {
                         chatMessages.addView(streamingBubble, params);
                     }
 
-                    streamingBubble.setText(
-                        MarkdownRenderer.render(partialReply + "▍"));
+                    ChatMessageRenderer.populate(
+                        streamingBubble, MainActivity.this,
+                        partialReply + "▍",
+                        0xffe7efff, 0xff101a31, 0xffa9e7ff, cyan);
 
                     if (chatScroll != null) chatScroll.post(() ->
                         chatScroll.fullScroll(View.FOCUS_DOWN));
@@ -1195,9 +1222,11 @@ public class MainActivity extends Activity {
                     activeChatRequest = null;
 
                     if (streamingBubble != null) {
-                        streamingBubble.setText(
-                            MarkdownRenderer.render(reply));
+                        ChatMessageRenderer.populate(
+                            streamingBubble, MainActivity.this, reply,
+                            0xffe7efff, 0xff101a31, 0xffa9e7ff, cyan);
                         streamingBubble = null;
+                        streamingReplyText = "";
                     } else {
                         addChatBubble(reply, false);
                     }
@@ -1219,11 +1248,13 @@ public class MainActivity extends Activity {
                     activeChatRequest = null;
 
                     if (streamingBubble != null) {
-                        streamingBubble.setText(MarkdownRenderer.render(
-                            streamingBubble.getText().toString()
-                                .replace("▍", "") +
-                            "\n\nConnection interrupted: " + error));
+                        ChatMessageRenderer.populate(
+                            streamingBubble, MainActivity.this,
+                            streamingReplyText +
+                                "\n\nConnection interrupted: " + error,
+                            0xffe7efff, 0xff101a31, 0xffa9e7ff, cyan);
                         streamingBubble = null;
+                        streamingReplyText = "";
                     } else {
                         addChatBubble(
                             "پیغام بھیجنے میں مسئلہ ہوا: " + error, false);
@@ -1243,12 +1274,14 @@ public class MainActivity extends Activity {
                     activeChatRequest = null;
 
                     if (streamingBubble != null) {
-                        String partial = streamingBubble.getText().toString()
-                            .replace("▍", "");
-                        streamingBubble.setText(MarkdownRenderer.render(
+                        String partial = streamingReplyText;
+                        ChatMessageRenderer.populate(
+                            streamingBubble, MainActivity.this,
                             partial.isEmpty() ? "Generation stopped." :
-                            partial + "\n\n[Generation stopped]"));
+                                partial + "\n\n[Generation stopped]",
+                            0xffe7efff, 0xff101a31, 0xffa9e7ff, cyan);
                         streamingBubble = null;
+                        streamingReplyText = "";
                     }
 
                     if (chatSendButton != null) {
