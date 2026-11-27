@@ -289,14 +289,7 @@ public class LaibaChatEngine {
                             "Gemini API key is missing. Please add it in Settings.");
                 }
 
-                JSONArray savedMemory = memory(app);
-                StringBuilder memoryText = new StringBuilder();
-
-                for (int i = Math.max(0, savedMemory.length() - 20); i < savedMemory.length(); i++) {
-                    memoryText.append("- ")
-                            .append(savedMemory.optString(i))
-                            .append("\n");
-                }
+                String memoryText = relevantMemoryText(app, cleanMessage);
 
                 String systemPrompt =
                         "You are Laiba, a helpful personal AI assistant. " +
@@ -312,7 +305,7 @@ public class LaibaChatEngine {
                         "If there are no useful new memories, return an empty array.\n\n" +
                         "SAVED MEMORY:\n" + memoryText;
 
-                JSONArray contents = buildContents(history(app));
+                JSONArray contents = buildContents(app, cleanMessage);
                 JSONObject body = new JSONObject();
 
                 JSONObject systemInstruction = new JSONObject();
@@ -334,18 +327,8 @@ public class LaibaChatEngine {
 
                 StringBuilder raw = new StringBuilder();
                 Exception lastError = null;
-                // Retry transient network/server failures, never duplicate a
-                // completed answer, and reset the live bubble before retrying.
-                // Respect a cooldown created by an earlier API request.
-                if (!ApiRateLimitHandler.waitForCooldown(app, request)) {
-                    if (request.isCancelled()) {
-                        removeLastMessage(app, "user", cleanMessage);
-                        handler.post(callback::onCancelled);
-                        return;
-                    }
-                    throw new Exception(
-                            "Cooldown wait interrupted. Please try again.");
-                }
+                // Send the current question immediately.
+                // No pre-request cooldown wait or automatic retry.
 
                 for (int attempt = 0; attempt < 1; attempt++) {
                     if (request.isCancelled()) break;
@@ -529,8 +512,8 @@ public class LaibaChatEngine {
             }
 
             connection.setRequestMethod("POST");
-            connection.setConnectTimeout(30000);
-            connection.setReadTimeout(60000);
+            connection.setConnectTimeout(10000);
+            connection.setReadTimeout(45000);
             connection.setDoOutput(true);
             connection.setUseCaches(false);
             connection.setRequestProperty("Accept", "text/event-stream");
@@ -755,42 +738,190 @@ public class LaibaChatEngine {
         return decoded.toString();
     }
 
-    private static JSONArray buildContents(JSONArray history) throws Exception {
+    private static JSONArray buildContents(
+            Context context, String currentMessage) throws Exception {
+
+        String prompt = currentMessage;
+
+        if (isHistoryRecallQuery(currentMessage)) {
+            String previous = findRelevantHistory(context, currentMessage);
+
+            if (!previous.isEmpty()) {
+                prompt = "Relevant excerpts from the user's locally saved "
+                        + "previous chat. Use them only to answer the current "
+                        + "question:\n"
+                        + previous
+                        + "\n\nCurrent user message:\n"
+                        + currentMessage;
+            }
+        }
+
+        JSONObject entry = new JSONObject();
+        entry.put("role", "user");
+
+        JSONArray parts = new JSONArray();
+        parts.put(new JSONObject().put("text", prompt));
+        entry.put("parts", parts);
+
         JSONArray contents = new JSONArray();
-        int start = Math.max(0, history.length() - 12);
+        contents.put(entry);
+        return contents;
+    }
 
-        for (int i = start; i < history.length(); i++) {
-            JSONObject item = history.optJSONObject(i);
-            if (item == null) continue;
+    private static boolean isHistoryRecallQuery(String message) {
+        String q = message.toLowerCase(java.util.Locale.ROOT);
 
-            String role = "model".equals(item.optString("role"))
-                    ? "model" : "user";
-            String text = item.optString("text", "");
-            if (text.trim().isEmpty()) continue;
+        String[] markers = {
+                "what did i ask", "what did i say", "what did i tell",
+                "what did we discuss", "what were we talking",
+                "previous chat", "previous conversation",
+                "chat history", "conversation history",
+                "last conversation", "last time", "earlier",
+                "before", "yesterday", "remember when",
+                "پہلے", "پچھلی", "پچھلا", "پچھلے",
+                "گزشتہ", "یاد ہے", "یاد کرو",
+                "میں نے کیا پوچھا", "میں نے پہلے",
+                "ہم نے کیا بات", "پچھلی گفتگو",
+                "پچھلی چیٹ", "پچھلے میسج"
+        };
 
-            if (contents.length() > 0) {
-                JSONObject previous = contents.optJSONObject(contents.length() - 1);
+        for (String marker : markers) {
+            if (q.contains(marker)) return true;
+        }
+        return false;
+    }
 
-                if (previous != null && role.equals(previous.optString("role"))) {
-                    JSONArray previousParts = previous.optJSONArray("parts");
-                    if (previousParts != null) {
-                        previousParts.put(new JSONObject().put("text", text));
-                        continue;
-                    }
+    private static java.util.Set<String> queryTerms(String query) {
+        java.util.Set<String> stop = new java.util.HashSet<>(
+                java.util.Arrays.asList(
+                        "what", "did", "do", "does", "you", "i", "we",
+                        "me", "my", "our", "your", "the", "a", "an",
+                        "is", "are", "was", "were", "to", "of", "in",
+                        "on", "for", "and", "or", "please", "tell",
+                        "show", "ask", "asked", "say", "said",
+                        "previous", "earlier", "before", "last",
+                        "time", "chat", "conversation", "history",
+                        "remember", "when", "about", "پہلے",
+                        "پچھلی", "پچھلا", "پچھلے", "گفتگو",
+                        "چیٹ", "یاد", "کیا", "میں", "نے",
+                        "ہم", "آپ", "مجھے", "بتاؤ", "بتائیں"
+                ));
+
+        java.util.Set<String> terms = new java.util.HashSet<>();
+        String[] words = query.toLowerCase(java.util.Locale.ROOT)
+                .split("[^\\p{L}\\p{N}]+");
+
+        for (String word : words) {
+            if (word.length() > 1 && !stop.contains(word)) {
+                terms.add(word);
+            }
+        }
+        return terms;
+    }
+
+    private static String relevantMemoryText(
+            Context context, String query) {
+
+        JSONArray saved = memory(context);
+        java.util.Set<String> terms = queryTerms(query);
+
+        if (terms.isEmpty()) return "";
+
+        StringBuilder result = new StringBuilder();
+        int added = 0;
+
+        for (int i = saved.length() - 1; i >= 0 && added < 5; i--) {
+            String fact = saved.optString(i);
+            java.util.Set<String> factTerms = queryTerms(fact);
+            boolean relevant = false;
+
+            for (String term : terms) {
+                if (factTerms.contains(term)) {
+                    relevant = true;
+                    break;
                 }
             }
 
-            JSONObject entry = new JSONObject();
-            entry.put("role", role);
-
-            JSONArray parts = new JSONArray();
-            parts.put(new JSONObject().put("text", text));
-            entry.put("parts", parts);
-
-            contents.put(entry);
+            if (relevant) {
+                result.append("- ").append(fact).append("\n");
+                added++;
+            }
         }
 
-        return contents;
+        return result.toString();
+    }
+
+    private static String findRelevantHistory(
+            Context context, String query) {
+
+        JSONArray saved = history(context);
+        int limit = saved.length();
+
+        // The newest entry is the current question, already sent separately.
+        JSONObject last = limit > 0
+                ? saved.optJSONObject(limit - 1) : null;
+
+        if (last != null
+                && "user".equals(last.optString("role"))
+                && query.equals(last.optString("text"))) {
+            limit--;
+        }
+
+        if (limit <= 0) return "";
+
+        java.util.Set<String> terms = queryTerms(query);
+        int[] scores = new int[limit];
+        java.util.ArrayList<Integer> selected =
+                new java.util.ArrayList<>();
+
+        for (int i = 0; i < limit; i++) {
+            JSONObject item = saved.optJSONObject(i);
+            if (item == null) continue;
+
+            java.util.Set<String> words =
+                    queryTerms(item.optString("text"));
+
+            for (String term : terms) {
+                if (words.contains(term)) scores[i]++;
+            }
+
+            if (scores[i] > 0) selected.add(i);
+        }
+
+        if (selected.isEmpty()) {
+            for (int i = Math.max(0, limit - 6); i < limit; i++) {
+                selected.add(i);
+            }
+        } else {
+            java.util.Collections.sort(selected, (a, b) ->
+                    Integer.compare(scores[b], scores[a]));
+
+            if (selected.size() > 6) {
+                selected = new java.util.ArrayList<>(
+                        selected.subList(0, 6));
+            }
+            java.util.Collections.sort(selected);
+        }
+
+        StringBuilder result = new StringBuilder();
+
+        for (int index : selected) {
+            JSONObject item = saved.optJSONObject(index);
+            if (item == null) continue;
+
+            String role = "model".equals(item.optString("role"))
+                    ? "Laiba" : "User";
+            String text = item.optString("text", "");
+
+            if (text.length() > 1500) {
+                text = text.substring(0, 1500);
+            }
+
+            result.append(role).append(": ")
+                    .append(text).append("\n");
+        }
+
+        return result.toString();
     }
 
     private static String readStream(InputStream stream) throws Exception {
