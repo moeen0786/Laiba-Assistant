@@ -89,7 +89,7 @@ public final class GeminiLiveCallClient {
         errorReported = false;
 
         try {
-            HttpUrl authenticatedEndpoint = HttpUrl.get(ENDPOINT)
+            HttpUrl authenticatedEndpoint = HttpUrl.get(ENDPOINT.replaceFirst("^wss://", "https://"))
                 .newBuilder()
                 .addQueryParameter("key", apiKey.trim())
                 .build();
