@@ -37,7 +37,7 @@ public final class GeminiLiveCallClient {
 
     private static final String ENDPOINT =
         "wss://generativelanguage.googleapis.com/ws/" +
-        "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+        "google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent";
 
     private final Callback callback;
     private final OkHttpClient http;
@@ -140,6 +140,10 @@ public final class GeminiLiveCallClient {
                     new JSONObject().put("voiceName", "Aoede")));
             generation.put("speechConfig", speech);
 
+            JSONObject thinking = new JSONObject();
+            thinking.put("thinkingLevel", "HIGH");
+            generation.put("thinkingConfig", thinking);
+
             setup.put("generationConfig", generation);
             setup.put("inputAudioTranscription", new JSONObject());
             setup.put("outputAudioTranscription", new JSONObject());
@@ -213,8 +217,11 @@ public final class GeminiLiveCallClient {
                 }
             }
 
-            String status = message.optString("interactionStatus", "");
-            if ("IDLE".equals(status)) {
+            String status = server.optString("interactionStatus", "");
+
+            if ("IN_PROGRESS".equals(status)) {
+                callback.onStatus("Laiba is thinking...");
+            } else if ("IDLE".equals(status)) {
                 callback.onStatus("Listening...");
             }
 
