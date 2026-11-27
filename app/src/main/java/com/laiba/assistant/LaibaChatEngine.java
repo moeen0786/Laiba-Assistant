@@ -239,6 +239,9 @@ public class LaibaChatEngine {
 
         Thread worker = new Thread(() -> {
             String finalReply = null;
+            JSONObject[] usageMetadata = new JSONObject[1];
+            int attempts = 0;
+            boolean usageRecorded = false;
 
             try {
                 if (apiKey == null || apiKey.trim().isEmpty()) {
@@ -291,10 +294,6 @@ public class LaibaChatEngine {
 
                 StringBuilder raw = new StringBuilder();
                 Exception lastError = null;
-                JSONObject[] usageMetadata = new JSONObject[1];
-                int attempts = 0;
-                boolean usageRecorded = false;
-
                 // Retry transient network/server failures, never duplicate a
                 // completed answer, and reset the live bubble before retrying.
                 for (int attempt = 0; attempt < 3; attempt++) {
