@@ -23,6 +23,8 @@ import java.util.concurrent.ExecutionException;
 
 public class LaibaChatEngine {
 
+    private static final int MAX_API_ATTEMPTS = 5;
+
     private static final String PREFS = "laiba_chat_memory_v1";
     private static final String HISTORY_KEY = "history";
     private static final String MEMORY_KEY = "memory";
@@ -459,7 +461,7 @@ public class LaibaChatEngine {
                 // Send the current question immediately.
                 // No pre-request cooldown wait or automatic retry.
 
-                for (int attempt = 0; attempt < 5; attempt++) {
+                for (int attempt = 0; attempt < MAX_API_ATTEMPTS; attempt++) {
                     if (request.isCancelled()) break;
 
                     raw.setLength(0);
@@ -508,7 +510,7 @@ public class LaibaChatEngine {
                                             http.retryAfter,
                                             attempt);
 
-                            if (!policy.retryable || attempt >= 4) {
+                            if (!policy.retryable || attempt >= MAX_API_ATTEMPTS - 1) {
                                 lastError = new Exception(policy.message);
                                 break;
                             }
@@ -516,7 +518,7 @@ public class LaibaChatEngine {
                             retryDelay = policy.delayMillis;
 
                         } else {
-                            if (attempt >= 4 || !isRetryable(failure)) break;
+                            if (attempt >= MAX_API_ATTEMPTS - 1 || !isRetryable(failure)) break;
                             retryDelay = ApiRateLimitHandler.backoffDelay(attempt);
                         }
 
