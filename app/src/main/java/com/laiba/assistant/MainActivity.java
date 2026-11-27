@@ -50,6 +50,7 @@ public class MainActivity extends Activity {
     private LinearLayout chatMessages;
     private ScrollView chatScroll;
     private boolean chatSending = false;
+    private View chatLoadingIndicator;
 
 
 
@@ -301,9 +302,15 @@ public class MainActivity extends Activity {
     private class SplashOrbView extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final long start = System.currentTimeMillis();
+        private final float radiusDp;
 
         SplashOrbView() {
+            this(72f);
+        }
+
+        SplashOrbView(float radiusDp) {
             super(MainActivity.this);
+            this.radiusDp = radiusDp;
         }
 
         @Override protected void onDraw(Canvas canvas) {
@@ -311,7 +318,7 @@ public class MainActivity extends Activity {
 
             float cx = getWidth() / 2f;
             float cy = getHeight() / 2f;
-            float r = dp(72);
+            float r = dp(radiusDp);
             float t = (System.currentTimeMillis() - start) / 1000f;
 
             paint.setStyle(Paint.Style.STROKE);
@@ -948,6 +955,7 @@ public class MainActivity extends Activity {
         chatScroll = new ScrollView(this);
         chatScroll.setFillViewport(false);
         chatMessages = column();
+        chatLoadingIndicator = null;
         chatMessages.setGravity(Gravity.TOP);
         chatMessages.setPadding(0, dp(8), 0, dp(12));
         chatScroll.addView(chatMessages, new ScrollView.LayoutParams(-1, -2));
@@ -1065,17 +1073,49 @@ public class MainActivity extends Activity {
         chatMessages.addView(bubble, lp);
     }
 
+    private void showChatLoadingIndicator() {
+        if (chatMessages == null || chatLoadingIndicator != null) return;
+
+        LinearLayout loadingRow = row();
+        loadingRow.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+
+        SplashOrbView logo = new SplashOrbView(24f);
+        loadingRow.addView(logo,
+            new LinearLayout.LayoutParams(dp(92), dp(68)));
+
+        LinearLayout.LayoutParams params =
+            new LinearLayout.LayoutParams(-1, -2);
+        params.gravity = Gravity.LEFT;
+        params.bottomMargin = dp(10);
+        chatMessages.addView(loadingRow, params);
+        chatLoadingIndicator = loadingRow;
+
+        if (chatScroll != null) chatScroll.post(() ->
+            chatScroll.fullScroll(View.FOCUS_DOWN));
+    }
+
+    private void removeChatLoadingIndicator() {
+        if (chatLoadingIndicator == null) return;
+        View indicator = chatLoadingIndicator;
+        chatLoadingIndicator = null;
+        if (indicator.getParent() instanceof ViewGroup) {
+            ((ViewGroup) indicator.getParent()).removeView(indicator);
+        }
+    }
+
     private void sendChatMessage(String message) {
         addChatBubble(message, true);
         if (chatScroll != null) chatScroll.post(() ->
             chatScroll.fullScroll(View.FOCUS_DOWN));
         chatSending = true;
+        showChatLoadingIndicator();
         final String key;
         try {
             key = loadApiKeySecurely();
             if (key == null || key.trim().isEmpty())
                 throw new Exception("Gemini API key is missing. Please reconnect it in Settings.");
         } catch (Exception e) {
+            removeChatLoadingIndicator();
             chatSending = false;
             addChatBubble("Laiba: " + e.getMessage(), false);
             return;
@@ -1083,6 +1123,7 @@ public class MainActivity extends Activity {
         LaibaChatEngine.send(this, key, message, new LaibaChatEngine.Callback() {
             @Override public void onReply(String reply) {
                 runOnUiThread(() -> {
+                    removeChatLoadingIndicator();
                     chatSending = false;
                     addChatBubble(reply, false);
                     if (chatScroll != null) chatScroll.post(() ->
@@ -1091,6 +1132,7 @@ public class MainActivity extends Activity {
             }
             @Override public void onError(String error) {
                 runOnUiThread(() -> {
+                    removeChatLoadingIndicator();
                     chatSending = false;
                     addChatBubble("پیغام بھیجنے میں مسئلہ ہوا: " + error, false);
                 });
