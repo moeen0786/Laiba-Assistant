@@ -13,6 +13,9 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.io.IOException;
+import java.net.SocketTimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class LaibaChatEngine {
 
@@ -23,8 +26,28 @@ public class LaibaChatEngine {
     private static final int MEMORY_LIMIT = 300;
 
     public interface Callback {
+        void onStream(String completePartialReply);
         void onReply(String reply);
         void onError(String error);
+        void onCancelled();
+    }
+
+    public static final class Request {
+        private final AtomicBoolean cancelled = new AtomicBoolean(false);
+        private volatile HttpURLConnection connection;
+        private volatile Thread worker;
+
+        public void cancel() {
+            if (!cancelled.compareAndSet(false, true)) return;
+            HttpURLConnection active = connection;
+            if (active != null) active.disconnect();
+            Thread running = worker;
+            if (running != null) running.interrupt();
+        }
+
+        public boolean isCancelled() {
+            return cancelled.get();
+        }
     }
 
     private static SharedPreferences prefs(Context context) {
@@ -190,33 +213,37 @@ public class LaibaChatEngine {
         return null;
     }
 
-    public static void send(
+    public static Request send(
             Context context, String apiKey, String message, Callback callback) {
 
         final Context app = context.getApplicationContext();
         final String cleanMessage = message == null ? "" : message.trim();
+        final Request request = new Request();
+        final android.os.Handler handler =
+                new android.os.Handler(app.getMainLooper());
 
         if (cleanMessage.isEmpty()) {
-            callback.onError("Please enter a message.");
-            return;
+            handler.post(() -> callback.onError("Please enter a message."));
+            return request;
         }
 
         String explicitFact = explicitMemoryText(app, cleanMessage);
-
         if (explicitFact != null) {
             saveMemory(app, explicitFact);
-            callback.onReply("ٹھیک ہے، میں نے یہ بات اپنی الگ Memory میں محفوظ کر لی ہے۔");
-            return;
+            handler.post(() -> callback.onReply(
+                    "ٹھیک ہے، میں نے یہ بات اپنی الگ Memory میں محفوظ کر لی ہے۔"));
+            return request;
         }
 
         addMessage(app, "user", cleanMessage);
 
-        new Thread(() -> {
-            HttpURLConnection connection = null;
+        Thread worker = new Thread(() -> {
+            String finalReply = null;
 
             try {
                 if (apiKey == null || apiKey.trim().isEmpty()) {
-                    throw new Exception("Gemini API key is missing. Please add it in Settings.");
+                    throw new Exception(
+                            "Gemini API key is missing. Please add it in Settings.");
                 }
 
                 JSONArray savedMemory = memory(app);
@@ -243,7 +270,6 @@ public class LaibaChatEngine {
                         "SAVED MEMORY:\n" + memoryText;
 
                 JSONArray contents = buildContents(history(app));
-
                 JSONObject body = new JSONObject();
 
                 JSONObject systemInstruction = new JSONObject();
@@ -256,112 +282,307 @@ public class LaibaChatEngine {
                 JSONObject generationConfig = new JSONObject();
                 generationConfig.put("responseMimeType", "application/json");
                 generationConfig.put("temperature", 0.7);
-                generationConfig.put("maxOutputTokens", 2048);
+                generationConfig.put("maxOutputTokens", 8192);
                 body.put("generationConfig", generationConfig);
 
-                URL url = new URL(
+                String endpoint =
                         "https://generativelanguage.googleapis.com/v1beta/models/" +
-                        "gemini-3.8-flash:generateContent");
+                        "gemini-3.8-flash:streamGenerateContent?alt=sse";
 
-                connection = (HttpURLConnection) url.openConnection();
-                connection.setRequestMethod("POST");
-                connection.setConnectTimeout(20000);
-                connection.setReadTimeout(60000);
-                connection.setDoOutput(true);
-                connection.setRequestProperty("Content-Type", "application/json");
-                connection.setRequestProperty("x-goog-api-key", apiKey.trim());
+                StringBuilder raw = new StringBuilder();
+                Exception lastError = null;
 
-                byte[] request = body.toString().getBytes(StandardCharsets.UTF_8);
+                // Retry transient network/server failures, never duplicate a
+                // completed answer, and reset the live bubble before retrying.
+                for (int attempt = 0; attempt < 3; attempt++) {
+                    if (request.isCancelled()) break;
 
-                try (OutputStream output = connection.getOutputStream()) {
-                    output.write(request);
-                }
+                    raw.setLength(0);
 
-                int status = connection.getResponseCode();
-                InputStream stream = status >= 200 && status < 300
-                        ? connection.getInputStream()
-                        : connection.getErrorStream();
-
-                String response = readStream(stream);
-
-                if (status < 200 || status >= 300) {
-                    String detail = response;
                     try {
-                        JSONObject error = new JSONObject(response);
-                        detail = error.optJSONObject("error") != null
-                                ? error.getJSONObject("error").optString("message", response)
-                                : response;
-                    } catch (Exception ignored) {
+                        streamAttempt(
+                                endpoint, apiKey.trim(), body, request, raw,
+                                handler, callback);
+
+                        lastError = null;
+                        break;
+
+                    } catch (Exception failure) {
+                        if (request.isCancelled()) break;
+                        lastError = failure;
+
+                        if (attempt >= 2 || !isRetryable(failure)) break;
+
+                        final int retryNumber = attempt + 1;
+                        handler.post(() -> {
+                            if (!request.isCancelled()) callback.onStream("");
+                        });
+
+                        try {
+                            Thread.sleep(700L * retryNumber);
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
                     }
-                    throw new Exception("Gemini API (" + status + "): " + detail);
                 }
 
-                JSONObject root = new JSONObject(response);
-                JSONArray candidates = root.optJSONArray("candidates");
+                if (request.isCancelled()) {
+                    removeLastMessage(app, "user", cleanMessage);
+                    handler.post(callback::onCancelled);
+                    return;
+                }
 
-                if (candidates == null || candidates.length() == 0) {
+                if (lastError != null) throw lastError;
+
+                String rawText = raw.toString().trim();
+                if (rawText.isEmpty()) {
                     throw new Exception("Gemini returned an empty response.");
                 }
 
-                JSONObject content = candidates.getJSONObject(0)
-                        .optJSONObject("content");
+                JSONObject result = new JSONObject(rawText);
+                finalReply = result.optString("reply", "").trim();
 
-                JSONArray parts = content == null
-                        ? null : content.optJSONArray("parts");
-
-                if (parts == null || parts.length() == 0) {
-                    throw new Exception("Gemini response did not contain text.");
+                if (finalReply.isEmpty()) {
+                    throw new Exception("Gemini returned an empty reply.");
                 }
 
-                String raw = parts.getJSONObject(0).optString("text", "").trim();
-                if (raw.isEmpty()) {
-                    throw new Exception("Gemini returned an empty message.");
-                }
-
-                String reply = raw;
-
-                try {
-                    String jsonText = raw
-                            .replaceFirst("^```json\\s*", "")
-                            .replaceFirst("^```\\s*", "")
-                            .replaceFirst("\\s*```$", "")
-                            .trim();
-
-                    JSONObject result = new JSONObject(jsonText);
-                    reply = result.optString("reply", raw).trim();
-
-                    JSONArray newMemories = result.optJSONArray("memories");
-                    if (newMemories != null) {
-                        for (int i = 0; i < newMemories.length(); i++) {
-                            saveMemory(app, newMemories.optString(i));
-                        }
+                JSONArray newMemories = result.optJSONArray("memories");
+                if (newMemories != null) {
+                    for (int i = 0; i < newMemories.length(); i++) {
+                        saveMemory(app, newMemories.optString(i));
                     }
-                } catch (Exception ignored) {
-                    reply = raw;
                 }
 
-                if (reply.isEmpty()) reply = raw;
+                if (request.isCancelled()) {
+                    removeLastMessage(app, "user", cleanMessage);
+                    handler.post(callback::onCancelled);
+                    return;
+                }
 
-                addMessage(app, "model", reply);
-                final String finalReply = reply;
+                // Persist only the completed assistant response.
+                addMessage(app, "model", finalReply);
+                final String completed = finalReply;
+                handler.post(() -> {
+                    if (!request.isCancelled()) callback.onReply(completed);
+                });
 
-                android.os.Handler handler =
-                        new android.os.Handler(app.getMainLooper());
-                handler.post(() -> callback.onReply(finalReply));
+            } catch (Exception failure) {
+                if (request.isCancelled()) {
+                    removeLastMessage(app, "user", cleanMessage);
+                    handler.post(callback::onCancelled);
+                    return;
+                }
 
-            } catch (Exception e) {
                 removeLastMessage(app, "user", cleanMessage);
-                String error = e.getMessage() == null
-                        ? "Unable to contact Gemini." : e.getMessage();
+                String error = failure.getMessage() == null
+                        ? "Unable to contact Gemini." : failure.getMessage();
 
-                android.os.Handler handler =
-                        new android.os.Handler(app.getMainLooper());
-                handler.post(() -> callback.onError(error));
+                handler.post(() -> {
+                    if (!request.isCancelled()) callback.onError(error);
+                });
 
             } finally {
-                if (connection != null) connection.disconnect();
+                request.connection = null;
             }
-        }).start();
+        }, "Laiba-Gemini-Streaming");
+
+        request.worker = worker;
+        worker.start();
+        return request;
+    }
+
+    private static void streamAttempt(
+            String endpoint,
+            String apiKey,
+            JSONObject body,
+            Request request,
+            StringBuilder raw,
+            android.os.Handler handler,
+            Callback callback) throws Exception {
+
+        HttpURLConnection connection = null;
+
+        try {
+            connection = (HttpURLConnection) new URL(endpoint).openConnection();
+            request.connection = connection;
+
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(20000);
+            connection.setReadTimeout(120000);
+            connection.setDoOutput(true);
+            connection.setUseCaches(false);
+            connection.setRequestProperty("Accept", "text/event-stream");
+            connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            connection.setRequestProperty("x-goog-api-key", apiKey);
+
+            byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
+            connection.setFixedLengthStreamingMode(payload.length);
+
+            try (OutputStream output = connection.getOutputStream()) {
+                output.write(payload);
+                output.flush();
+            }
+
+            if (request.isCancelled()) return;
+
+            int status = connection.getResponseCode();
+            if (status < 200 || status >= 300) {
+                InputStream errorStream = connection.getErrorStream();
+                String detail = readStream(errorStream);
+
+                try {
+                    JSONObject errorJson = new JSONObject(detail);
+                    JSONObject errorObject = errorJson.optJSONObject("error");
+                    if (errorObject != null) {
+                        detail = errorObject.optString("message", detail);
+                    }
+                } catch (Exception ignored) {
+                }
+
+                throw new HttpFailure(status,
+                        "Gemini API (" + status + "): " + detail);
+            }
+
+            StringBuilder partialJsonReply = new StringBuilder();
+
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(
+                            connection.getInputStream(), StandardCharsets.UTF_8))) {
+
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (request.isCancelled()) return;
+                    if (!line.startsWith("data:")) continue;
+
+                    String data = line.substring(5).trim();
+                    if (data.isEmpty() || "[DONE]".equals(data)) continue;
+
+                    JSONObject event;
+                    try {
+                        event = new JSONObject(data);
+                    } catch (Exception malformedEvent) {
+                        continue;
+                    }
+
+                    JSONArray candidates = event.optJSONArray("candidates");
+                    if (candidates == null || candidates.length() == 0) continue;
+
+                    JSONObject candidate = candidates.optJSONObject(0);
+                    JSONObject content = candidate == null
+                            ? null : candidate.optJSONObject("content");
+                    JSONArray parts = content == null
+                            ? null : content.optJSONArray("parts");
+
+                    if (parts == null) continue;
+
+                    for (int i = 0; i < parts.length(); i++) {
+                        JSONObject part = parts.optJSONObject(i);
+                        if (part == null) continue;
+
+                        String chunk = part.optString("text", "");
+                        if (!chunk.isEmpty()) raw.append(chunk);
+                    }
+
+                    String visible = extractJsonStringField(raw.toString(), "reply");
+                    if (!visible.equals(partialJsonReply.toString())) {
+                        partialJsonReply.setLength(0);
+                        partialJsonReply.append(visible);
+
+                        final String snapshot = visible;
+                        handler.post(() -> {
+                            if (!request.isCancelled()) callback.onStream(snapshot);
+                        });
+                    }
+                }
+            }
+
+            if (!request.isCancelled() && raw.length() == 0) {
+                throw new IOException("Gemini stream ended without response text.");
+            }
+
+        } finally {
+            request.connection = null;
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private static final class HttpFailure extends IOException {
+        final int status;
+
+        HttpFailure(int status, String message) {
+            super(message);
+            this.status = status;
+        }
+    }
+
+    private static boolean isRetryable(Exception error) {
+        if (error instanceof HttpFailure) {
+            int code = ((HttpFailure) error).status;
+            return code == 408 || code == 429 || code == 500
+                    || code == 502 || code == 503 || code == 504;
+        }
+        return error instanceof SocketTimeoutException
+                || error instanceof IOException;
+    }
+
+    // Reads the "reply" JSON string while it is still being generated.
+    // Incomplete escape sequences are held until the next stream chunk.
+    private static String extractJsonStringField(String json, String field) {
+        String marker = "\"" + field + "\"";
+        int key = json.indexOf(marker);
+        if (key < 0) return "";
+
+        int colon = json.indexOf(':', key + marker.length());
+        if (colon < 0) return "";
+
+        int quote = colon + 1;
+        while (quote < json.length()
+                && Character.isWhitespace(json.charAt(quote))) quote++;
+
+        if (quote >= json.length() || json.charAt(quote) != '"') return "";
+
+        StringBuilder decoded = new StringBuilder();
+
+        for (int i = quote + 1; i < json.length(); i++) {
+            char c = json.charAt(i);
+
+            if (c == '"') break;
+
+            if (c != '\\') {
+                decoded.append(c);
+                continue;
+            }
+
+            if (i + 1 >= json.length()) break;
+            char escaped = json.charAt(++i);
+
+            switch (escaped) {
+                case '"': decoded.append('"'); break;
+                case '\\': decoded.append('\\'); break;
+                case '/': decoded.append('/'); break;
+                case 'b': decoded.append('\b'); break;
+                case 'f': decoded.append('\f'); break;
+                case 'n': decoded.append('\n'); break;
+                case 'r': decoded.append('\r'); break;
+                case 't': decoded.append('\t'); break;
+                case 'u':
+                    if (i + 4 >= json.length()) return decoded.toString();
+                    try {
+                        decoded.append((char) Integer.parseInt(
+                                json.substring(i + 1, i + 5), 16));
+                        i += 4;
+                    } catch (NumberFormatException invalidEscape) {
+                        return decoded.toString();
+                    }
+                    break;
+                default:
+                    decoded.append(escaped);
+                    break;
+            }
+        }
+
+        return decoded.toString();
     }
 
     private static JSONArray buildContents(JSONArray history) throws Exception {

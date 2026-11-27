@@ -51,6 +51,9 @@ public class MainActivity extends Activity {
     private ScrollView chatScroll;
     private boolean chatSending = false;
     private View chatLoadingIndicator;
+    private LaibaChatEngine.Request activeChatRequest;
+    private TextView chatSendButton;
+    private TextView streamingBubble;
 
 
 
@@ -994,6 +997,7 @@ public class MainActivity extends Activity {
         call.setOnClickListener(v -> showCallScreen());
 
         TextView send = text("↑", 24, Color.WHITE, true);
+        chatSendButton = send;
         send.setBackground(shape(0xff3185ff, dp(24), 0, 0));
         send.setElevation(dp(3));
 
@@ -1008,8 +1012,14 @@ public class MainActivity extends Activity {
 
 
         send.setOnClickListener(v -> {
+            if (chatSending) {
+                LaibaChatEngine.Request running = activeChatRequest;
+                if (running != null) running.cancel();
+                return;
+            }
+
             String message = input.getText().toString().trim();
-            if (message.isEmpty() || chatSending) return;
+            if (message.isEmpty()) return;
             input.setText("");
             sendChatMessage(message);
         });
@@ -1021,8 +1031,9 @@ public class MainActivity extends Activity {
             @Override public void onTextChanged(
                 CharSequence s, int start, int before, int count) {
                 boolean hasText = s != null && s.toString().trim().length() > 0;
-                call.setVisibility(hasText ? View.GONE : View.VISIBLE);
-                send.setVisibility(hasText ? View.VISIBLE : View.GONE);
+                call.setVisibility(hasText || chatSending ? View.GONE : View.VISIBLE);
+                send.setVisibility(hasText || chatSending ? View.VISIBLE : View.GONE);
+                send.setText(chatSending ? "■" : "↑");
             }
 
             @Override public void afterTextChanged(
@@ -1107,34 +1118,140 @@ public class MainActivity extends Activity {
         addChatBubble(message, true);
         if (chatScroll != null) chatScroll.post(() ->
             chatScroll.fullScroll(View.FOCUS_DOWN));
+
         chatSending = true;
+        if (chatSendButton != null) {
+            chatSendButton.setText("■");
+            chatSendButton.setVisibility(View.VISIBLE);
+        }
+
         showChatLoadingIndicator();
+
         final String key;
         try {
             key = loadApiKeySecurely();
-            if (key == null || key.trim().isEmpty())
-                throw new Exception("Gemini API key is missing. Please reconnect it in Settings.");
+            if (key == null || key.trim().isEmpty()) {
+                throw new Exception(
+                    "Gemini API key is missing. Please reconnect it in Settings.");
+            }
         } catch (Exception e) {
             removeChatLoadingIndicator();
             chatSending = false;
+            if (chatSendButton != null) chatSendButton.setText("↑");
             addChatBubble("Laiba: " + e.getMessage(), false);
             return;
         }
-        LaibaChatEngine.send(this, key, message, new LaibaChatEngine.Callback() {
-            @Override public void onReply(String reply) {
+
+        activeChatRequest = LaibaChatEngine.send(
+            this, key, message, new LaibaChatEngine.Callback() {
+
+            @Override public void onStream(String partialReply) {
                 runOnUiThread(() -> {
+                    if (!chatSending) return;
+
                     removeChatLoadingIndicator();
-                    chatSending = false;
-                    addChatBubble(reply, false);
+
+                    if (partialReply == null || partialReply.isEmpty()) {
+                        if (streamingBubble != null) {
+                            if (streamingBubble.getParent() instanceof ViewGroup) {
+                                ((ViewGroup) streamingBubble.getParent())
+                                    .removeView(streamingBubble);
+                            }
+                            streamingBubble = null;
+                        }
+                        return;
+                    }
+
+                    if (streamingBubble == null) {
+                        streamingBubble = text("", 14, 0xffe7efff, false);
+                        streamingBubble.setGravity(
+                            Gravity.LEFT | Gravity.CENTER_VERTICAL);
+                        streamingBubble.setTextIsSelectable(true);
+                        streamingBubble.setPadding(
+                            dp(14), dp(11), dp(14), dp(11));
+                        streamingBubble.setBackground(shape(
+                            0xff192640, dp(18), dp(1), 0xff30496c));
+
+                        LinearLayout.LayoutParams params =
+                            new LinearLayout.LayoutParams(-1, -2);
+                        params.gravity = Gravity.LEFT;
+                        params.bottomMargin = dp(10);
+                        chatMessages.addView(streamingBubble, params);
+                    }
+
+                    streamingBubble.setText(partialReply + "▍");
+
                     if (chatScroll != null) chatScroll.post(() ->
                         chatScroll.fullScroll(View.FOCUS_DOWN));
                 });
             }
+
+            @Override public void onReply(String reply) {
+                runOnUiThread(() -> {
+                    removeChatLoadingIndicator();
+                    chatSending = false;
+                    activeChatRequest = null;
+
+                    if (streamingBubble != null) {
+                        streamingBubble.setText(reply);
+                        streamingBubble = null;
+                    } else {
+                        addChatBubble(reply, false);
+                    }
+
+                    if (chatSendButton != null) {
+                        chatSendButton.setText("↑");
+                        chatSendButton.setVisibility(View.GONE);
+                    }
+
+                    if (chatScroll != null) chatScroll.post(() ->
+                        chatScroll.fullScroll(View.FOCUS_DOWN));
+                });
+            }
+
             @Override public void onError(String error) {
                 runOnUiThread(() -> {
                     removeChatLoadingIndicator();
                     chatSending = false;
-                    addChatBubble("پیغام بھیجنے میں مسئلہ ہوا: " + error, false);
+                    activeChatRequest = null;
+
+                    if (streamingBubble != null) {
+                        streamingBubble.setText(
+                            streamingBubble.getText().toString()
+                                .replace("▍", "") +
+                            "\n\nConnection interrupted: " + error);
+                        streamingBubble = null;
+                    } else {
+                        addChatBubble(
+                            "پیغام بھیجنے میں مسئلہ ہوا: " + error, false);
+                    }
+
+                    if (chatSendButton != null) {
+                        chatSendButton.setText("↑");
+                        chatSendButton.setVisibility(View.GONE);
+                    }
+                });
+            }
+
+            @Override public void onCancelled() {
+                runOnUiThread(() -> {
+                    removeChatLoadingIndicator();
+                    chatSending = false;
+                    activeChatRequest = null;
+
+                    if (streamingBubble != null) {
+                        String partial = streamingBubble.getText().toString()
+                            .replace("▍", "");
+                        streamingBubble.setText(
+                            partial.isEmpty() ? "Generation stopped." :
+                            partial + "\n\n[Generation stopped]");
+                        streamingBubble = null;
+                    }
+
+                    if (chatSendButton != null) {
+                        chatSendButton.setText("↑");
+                        chatSendButton.setVisibility(View.GONE);
+                    }
                 });
             }
         });
