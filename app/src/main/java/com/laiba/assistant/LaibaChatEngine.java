@@ -529,8 +529,8 @@ public class LaibaChatEngine {
             }
 
             connection.setRequestMethod("POST");
-            connection.setConnectTimeout(10000);
-            connection.setReadTimeout(45000);
+            connection.setConnectTimeout(30000);
+            connection.setReadTimeout(60000);
             connection.setDoOutput(true);
             connection.setUseCaches(false);
             connection.setRequestProperty("Accept", "text/event-stream");
