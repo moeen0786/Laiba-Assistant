@@ -40,7 +40,7 @@ public final class GeminiLiveCallClient {
 
     private static final String ENDPOINT =
         "wss://generativelanguage.googleapis.com/ws/" +
-        "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+        "google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent";
 
     private final Callback callback;
     private final OkHttpClient http;
@@ -177,8 +177,16 @@ public final class GeminiLiveCallClient {
             });
 
         } catch (Exception error) {
+            String detail = error.getMessage();
+
             close();
-            reportError("Could not start Gemini Live.");
+
+            reportError(
+                "Could not start Gemini Live: " +
+                (detail == null || detail.trim().isEmpty()
+                    ? error.getClass().getSimpleName()
+                    : detail)
+            );
         }
     }
 
