@@ -8,6 +8,8 @@ import android.media.AudioManager;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Base64;
 
 import okhttp3.OkHttpClient;
@@ -59,6 +61,14 @@ public final class GeminiLiveCallClient {
     private AudioManager.OnAudioFocusChangeListener focusListener;
     private volatile boolean audioFocusGranted = false;
     private volatile boolean errorReported = false;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Runnable setupTimeout = () -> {
+        if (running.get() && !ready.get()) {
+            reportError(
+                "Gemini Live setup timed out. Check API key, model access and connection.");
+            close();
+        }
+    };
 
     public GeminiLiveCallClient(Callback callback) {
         this.callback = callback;
@@ -88,6 +98,13 @@ public final class GeminiLiveCallClient {
             socket = http.newWebSocket(request, new WebSocketListener() {
                 @Override
                 public void onOpen(WebSocket webSocket, Response response) {
+                    if (!running.get()) {
+                        webSocket.close(1000, "Call already ended");
+                        return;
+                    }
+                    mainHandler.removeCallbacks(setupTimeout);
+                    mainHandler.postDelayed(setupTimeout, 20000);
+                    callback.onStatus("Connected to server. Configuring Gemini...");
                     sendSetup();
                 }
 
@@ -166,8 +183,11 @@ public final class GeminiLiveCallClient {
             realtime.put("activityHandling", "START_OF_ACTIVITY_INTERRUPTS");
             setup.put("realtimeInputConfig", realtime);
 
-            socket.send(new JSONObject()
-                .put("setup", setup).toString());
+            if (socket == null || !socket.send(
+                    new JSONObject().put("setup", setup).toString())) {
+                throw new IllegalStateException(
+                    "Gemini setup message could not be sent.");
+            }
 
         } catch (Exception error) {
             reportError("Gemini Live setup failed.");
@@ -204,6 +224,7 @@ public final class GeminiLiveCallClient {
             }
 
             if (message.has("setupComplete")) {
+                mainHandler.removeCallbacks(setupTimeout);
                 ready.set(true);
                 callback.onStatus("Connected. Laiba is listening.");
                 startAudio();
@@ -248,7 +269,9 @@ public final class GeminiLiveCallClient {
                 }
             }
 
-            String status = server.optString("interactionStatus", "");
+            // Gemini 3.8 Extended Thinking sends interactionStatus
+            // at the top-level server message, not inside serverContent.
+            String status = message.optString("interactionStatus", "");
 
             if ("IN_PROGRESS".equals(status)) {
                 callback.onStatus("Laiba is thinking...");
@@ -554,6 +577,7 @@ public final class GeminiLiveCallClient {
         if (!running.getAndSet(false)) return;
 
         ready.set(false);
+        mainHandler.removeCallbacks(setupTimeout);
 
         if (microphoneThread != null) {
             microphoneThread.interrupt();
