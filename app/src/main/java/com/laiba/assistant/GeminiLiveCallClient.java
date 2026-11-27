@@ -55,6 +55,7 @@ public final class GeminiLiveCallClient {
     private Thread microphoneThread;
     private AudioFocusRequest focusRequest;
     private AudioManager audioManager;
+    private AudioManager.OnAudioFocusChangeListener focusListener;
     private boolean audioFocusGranted = false;
 
     public GeminiLiveCallClient(Callback callback) {
@@ -265,6 +266,10 @@ public final class GeminiLiveCallClient {
                 Math.max(inputBuffer * 2, 4096)
             );
 
+            if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
+                throw new IllegalStateException("Microphone initialization failed.");
+            }
+
             AudioAttributes attributes = new AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -283,6 +288,10 @@ public final class GeminiLiveCallClient {
                 .setBufferSizeInBytes(Math.max(outputBuffer * 2, 8192))
                 .build();
 
+            if (player.getState() != AudioTrack.STATE_INITIALIZED) {
+                throw new IllegalStateException("Audio output initialization failed.");
+            }
+
             if (recorderContext == null) {
                 throw new IllegalStateException("Audio context unavailable.");
             }
@@ -297,6 +306,14 @@ public final class GeminiLiveCallClient {
 
             audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
 
+            focusListener = change -> {
+                if (change == AudioManager.AUDIOFOCUS_LOSS) {
+                    close();
+                } else if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                    stopPlayback();
+                }
+            };
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 AudioAttributes focusAttributes =
                     new AudioAttributes.Builder()
@@ -308,13 +325,7 @@ public final class GeminiLiveCallClient {
                     AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
                     .setAudioAttributes(focusAttributes)
                     .setAcceptsDelayedFocusGain(false)
-                    .setOnAudioFocusChangeListener(change -> {
-                        if (change == AudioManager.AUDIOFOCUS_LOSS) {
-                            close();
-                        } else if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-                            stopPlayback();
-                        }
-                    })
+                    .setOnAudioFocusChangeListener(focusListener)
                     .build();
 
                 audioFocusGranted =
@@ -323,14 +334,7 @@ public final class GeminiLiveCallClient {
             } else {
                 audioFocusGranted =
                     audioManager.requestAudioFocus(
-                        change -> {
-                            if (change == AudioManager.AUDIOFOCUS_LOSS) {
-                                close();
-                            } else if (change ==
-                                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-                                stopPlayback();
-                            }
-                        },
+                        focusListener,
                         AudioManager.STREAM_VOICE_CALL,
                         AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
                     ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
@@ -497,13 +501,14 @@ public final class GeminiLiveCallClient {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
                         focusRequest != null) {
                     audioManager.abandonAudioFocusRequest(focusRequest);
-                } else {
-                    audioManager.abandonAudioFocus(null);
+                } else if (focusListener != null) {
+                    audioManager.abandonAudioFocus(focusListener);
                 }
             } catch (Exception ignored) {}
 
             audioFocusGranted = false;
             focusRequest = null;
+            focusListener = null;
             audioManager = null;
         }
 
