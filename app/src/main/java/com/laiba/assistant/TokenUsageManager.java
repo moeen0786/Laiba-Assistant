@@ -13,7 +13,7 @@ public final class TokenUsageManager {
     private static final String PREFS = "laiba_token_usage_v1";
     private static final String RECORDS = "records";
     private static final int LIMIT = 1000;
-    private static final String MODEL = "gemini-3.8-flash";
+    private static final String MODEL = "gemma-4-31b-it";
 
     private TokenUsageManager() {}
 

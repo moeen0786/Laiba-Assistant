@@ -446,13 +446,13 @@ public class LaibaChatEngine {
                 generationConfig.put("maxOutputTokens", 1024);
 
                 JSONObject thinkingConfig = new JSONObject();
-                thinkingConfig.put("thinkingLevel", "LOW");
+                thinkingConfig.put("thinkingLevel", "minimal");
                 generationConfig.put("thinkingConfig", thinkingConfig);
                 body.put("generationConfig", generationConfig);
 
                 String endpoint =
                         "https://generativelanguage.googleapis.com/v1beta/models/" +
-                        "gemini-3.8-flash:streamGenerateContent?alt=sse";
+                        "gemma-4-31b-it:streamGenerateContent?alt=sse";
 
                 StringBuilder raw = new StringBuilder();
                 Exception lastError = null;
