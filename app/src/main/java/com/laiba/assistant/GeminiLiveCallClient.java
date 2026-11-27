@@ -355,16 +355,21 @@ public final class GeminiLiveCallClient {
                 byte[] buffer = new byte[1280];
 
                 while (running.get()) {
-                    if (muted.get()) {
-                        try { Thread.sleep(20); }
-                        catch (InterruptedException ignored) { break; }
-                        continue;
-                    }
+                    AudioRecord currentRecorder = recorder;
+                    if (currentRecorder == null) break;
 
-                    int count = recorder.read(
+                    boolean currentlyMuted = muted.get();
+
+                    int count = currentRecorder.read(
                         buffer, 0, buffer.length,
                         AudioRecord.READ_BLOCKING
                     );
+
+                    // Discard captured audio while muted so stale speech
+                    // is never transmitted after unmuting.
+                    if (currentlyMuted) {
+                        continue;
+                    }
 
                     if (count < 0) {
                         if (running.get()) {
